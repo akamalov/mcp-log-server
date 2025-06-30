@@ -1,0 +1,761 @@
+import * as fs from 'fs/promises';
+import { watch } from 'fs';
+import * as path from 'path';
+import { EventEmitter } from 'events';
+import { 
+  AgentAdapter, 
+  LogEntry, 
+  AgentConfig, 
+  LogLevel, 
+  AgentStatus,
+  CrossPlatformPath 
+} from '@mcp-log-server/types/agent';
+
+/**
+ * Custom source configuration schema
+ */
+export interface CustomSourceConfig {
+  id: string;
+  name: string;
+  description?: string;
+  type: 'file' | 'directory' | 'stream' | 'api';
+  paths: CrossPlatformPath;
+  format: 'json' | 'jsonl' | 'csv' | 'text' | 'xml' | 'custom';
+  mcp_adapter?: string;
+  polling_interval: number;
+  privacy_level: 'low' | 'medium' | 'high';
+  enabled: boolean;
+  parser_config?: {
+    timestamp_format?: string;
+    level_mapping?: Record<string, LogLevel>;
+    field_mappings?: Record<string, string>;
+    regex_patterns?: string[];
+    json_path?: string;
+    delimiter?: string;
+  };
+  filters?: {
+    include_patterns?: string[];
+    exclude_patterns?: string[];
+    level_filter?: LogLevel[];
+    time_range?: {
+      start?: string;
+      end?: string;
+    };
+  };
+  metadata?: Record<string, any>;
+}
+
+/**
+ * Configuration validation result
+ */
+export interface ValidationResult {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+}
+
+/**
+ * Custom log parser interface
+ */
+export interface CustomLogParser {
+  parse(line: string, config: CustomSourceConfig): LogEntry | null;
+  validate(config: CustomSourceConfig): ValidationResult;
+}
+
+/**
+ * Custom Source Manager
+ * 
+ * Manages custom log source configurations with runtime validation,
+ * hot reload capabilities, and pluggable parsers.
+ */
+export class CustomSourceManager extends EventEmitter {
+  private sources: Map<string, CustomSourceConfig> = new Map();
+  private adapters: Map<string, CustomSourceAdapter> = new Map();
+  private parsers: Map<string, CustomLogParser> = new Map();
+  private configPath: string;
+  private configWatcher?: ReturnType<typeof watch>;
+
+  constructor(configPath: string) {
+    super();
+    this.configPath = configPath;
+    this.registerDefaultParsers();
+  }
+
+  /**
+   * Initialize custom source manager
+   */
+  async initialize(): Promise<void> {
+    try {
+      await this.loadConfiguration();
+      await this.startConfigWatcher();
+      await this.initializeAdapters();
+      this.emit('initialized');
+    } catch (error) {
+      this.emit('error', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Load configuration from file
+   */
+  private async loadConfiguration(): Promise<void> {
+    try {
+      const configContent = await fs.readFile(this.configPath, 'utf-8');
+      const config = JSON.parse(configContent);
+      
+      if (config.custom_sources) {
+        for (const [id, sourceConfig] of Object.entries(config.custom_sources)) {
+          const customConfig = sourceConfig as Partial<CustomSourceConfig>;
+          const fullConfig: CustomSourceConfig = {
+            id,
+            name: customConfig.name || id,
+            description: customConfig.description,
+            type: customConfig.type || 'file',
+            paths: customConfig.paths || { linux: '', darwin: '', win32: '' },
+            format: customConfig.format || 'json',
+            mcp_adapter: customConfig.mcp_adapter,
+            polling_interval: customConfig.polling_interval || 1000,
+            privacy_level: customConfig.privacy_level || 'medium',
+            enabled: customConfig.enabled !== false,
+            parser_config: customConfig.parser_config,
+            filters: customConfig.filters,
+            metadata: customConfig.metadata
+          };
+
+          const validation = this.validateSourceConfig(fullConfig);
+          if (validation.valid) {
+            this.sources.set(id, fullConfig);
+            if (validation.warnings.length > 0) {
+              console.warn(`Warnings for source ${id}:`, validation.warnings);
+            }
+          } else {
+            console.error(`Invalid source configuration ${id}:`, validation.errors);
+          }
+        }
+      }
+
+      this.emit('configuration-loaded', this.sources.size);
+    } catch (error) {
+      console.error('Failed to load custom source configuration:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Start watching configuration file for changes
+   */
+  private async startConfigWatcher(): Promise<void> {
+    try {
+      this.configWatcher = watch(this.configPath, async (eventType: string) => {
+        if (eventType === 'change') {
+          console.info('Configuration file changed, reloading...');
+          await this.reloadConfiguration();
+        }
+      });
+    } catch (error) {
+      console.warn('Failed to start configuration watcher:', error);
+    }
+  }
+
+  /**
+   * Reload configuration (hot reload)
+   */
+  private async reloadConfiguration(): Promise<void> {
+    try {
+      // Disconnect existing adapters
+      for (const adapter of this.adapters.values()) {
+        await adapter.disconnect();
+      }
+      this.adapters.clear();
+      this.sources.clear();
+
+      // Reload configuration
+      await this.loadConfiguration();
+      await this.initializeAdapters();
+
+      this.emit('configuration-reloaded', this.sources.size);
+    } catch (error) {
+      this.emit('error', error);
+    }
+  }
+
+  /**
+   * Initialize adapters for all enabled sources
+   */
+  private async initializeAdapters(): Promise<void> {
+    for (const sourceConfig of this.sources.values()) {
+      if (sourceConfig.enabled) {
+        try {
+          const adapter = new CustomSourceAdapter(sourceConfig, this.getParser(sourceConfig));
+          await adapter.initialize();
+          
+          adapter.on('log', (entry: LogEntry) => {
+            this.emit('log', entry);
+          });
+          
+          adapter.on('error', (error: Error) => {
+            this.emit('error', error);
+          });
+
+          this.adapters.set(sourceConfig.id, adapter);
+        } catch (error) {
+          console.error(`Failed to initialize adapter for ${sourceConfig.id}:`, error);
+        }
+      }
+    }
+  }
+
+  /**
+   * Validate source configuration
+   */
+  private validateSourceConfig(config: CustomSourceConfig): ValidationResult {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+
+    // Required fields
+    if (!config.id) errors.push('Missing required field: id');
+    if (!config.name) errors.push('Missing required field: name');
+    if (!config.type) errors.push('Missing required field: type');
+    if (!config.paths) errors.push('Missing required field: paths');
+
+    // Type validation
+    if (config.type && !['file', 'directory', 'stream', 'api'].includes(config.type)) {
+      errors.push(`Invalid type: ${config.type}`);
+    }
+
+    // Format validation
+    if (config.format && !['json', 'jsonl', 'csv', 'text', 'xml', 'custom'].includes(config.format)) {
+      errors.push(`Invalid format: ${config.format}`);
+    }
+
+    // Privacy level validation
+    if (config.privacy_level && !['low', 'medium', 'high'].includes(config.privacy_level)) {
+      errors.push(`Invalid privacy_level: ${config.privacy_level}`);
+    }
+
+    // Path validation
+    if (config.paths) {
+      const platform = process.platform as keyof CrossPlatformPath;
+      const currentPath = config.paths[platform];
+      if (!currentPath) {
+        warnings.push(`No path configured for current platform: ${platform}`);
+      }
+    }
+
+    // Parser validation
+    if (config.mcp_adapter && !this.parsers.has(config.mcp_adapter)) {
+      errors.push(`Unknown parser: ${config.mcp_adapter}`);
+    }
+
+    // Delegate to custom parser validation
+    if (config.mcp_adapter) {
+      const parser = this.parsers.get(config.mcp_adapter);
+      if (parser) {
+        const parserValidation = parser.validate(config);
+        errors.push(...parserValidation.errors);
+        warnings.push(...parserValidation.warnings);
+      }
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors,
+      warnings
+    };
+  }
+
+  /**
+   * Get parser for source configuration
+   */
+  private getParser(config: CustomSourceConfig): CustomLogParser {
+    if (config.mcp_adapter && this.parsers.has(config.mcp_adapter)) {
+      return this.parsers.get(config.mcp_adapter)!;
+    }
+    
+    // Return default parser based on format
+    return this.parsers.get(`default_${config.format}`) || this.parsers.get('default_json')!;
+  }
+
+  /**
+   * Register default parsers
+   */
+  private registerDefaultParsers(): void {
+    // JSON parser
+    this.parsers.set('default_json', new JSONLogParser());
+    this.parsers.set('custom_json_parser', new JSONLogParser());
+    
+    // JSON Lines parser
+    this.parsers.set('default_jsonl', new JSONLinesLogParser());
+    
+    // Text parser
+    this.parsers.set('default_text', new TextLogParser());
+    
+    // CSV parser
+    this.parsers.set('default_csv', new CSVLogParser());
+  }
+
+  /**
+   * Register custom parser
+   */
+  registerParser(name: string, parser: CustomLogParser): void {
+    this.parsers.set(name, parser);
+    this.emit('parser-registered', name);
+  }
+
+  /**
+   * Get all source configurations
+   */
+  getSources(): CustomSourceConfig[] {
+    return Array.from(this.sources.values());
+  }
+
+  /**
+   * Get source configuration by ID
+   */
+  getSource(id: string): CustomSourceConfig | undefined {
+    return this.sources.get(id);
+  }
+
+  /**
+   * Update source configuration
+   */
+  async updateSource(id: string, updates: Partial<CustomSourceConfig>): Promise<void> {
+    const existing = this.sources.get(id);
+    if (!existing) {
+      throw new Error(`Source not found: ${id}`);
+    }
+
+    const updated = { ...existing, ...updates };
+    const validation = this.validateSourceConfig(updated);
+    
+    if (!validation.valid) {
+      throw new Error(`Invalid configuration: ${validation.errors.join(', ')}`);
+    }
+
+    this.sources.set(id, updated);
+    
+    // Restart adapter if it exists
+    const adapter = this.adapters.get(id);
+    if (adapter) {
+      await adapter.disconnect();
+      
+      if (updated.enabled) {
+        const newAdapter = new CustomSourceAdapter(updated, this.getParser(updated));
+        await newAdapter.initialize();
+        this.adapters.set(id, newAdapter);
+      } else {
+        this.adapters.delete(id);
+      }
+    }
+
+    this.emit('source-updated', id, updated);
+  }
+
+  /**
+   * Disconnect and cleanup
+   */
+  async disconnect(): Promise<void> {
+    if (this.configWatcher) {
+      this.configWatcher.close();
+    }
+
+    for (const adapter of this.adapters.values()) {
+      await adapter.disconnect();
+    }
+    
+    this.adapters.clear();
+    this.sources.clear();
+    this.parsers.clear();
+
+    this.emit('disconnected');
+  }
+}
+
+/**
+ * Custom Source Adapter
+ * 
+ * Adapter implementation for custom sources
+ */
+class CustomSourceAdapter extends EventEmitter implements AgentAdapter {
+  public readonly name: string;
+  public readonly version = '1.0.0';
+  public readonly supportsMCP = false;
+  
+  private config: CustomSourceConfig;
+  private parser: CustomLogParser;
+  private status: AgentStatus = 'disconnected';
+  private watchers: fs.FSWatcher[] = [];
+  private lastProcessedTimestamp: Date = new Date(0);
+
+  constructor(config: CustomSourceConfig, parser: CustomLogParser) {
+    super();
+    this.config = config;
+    this.parser = parser;
+    this.name = `custom-${config.id}`;
+  }
+
+  async initialize(): Promise<void> {
+    try {
+      this.status = 'connecting';
+      this.emit('status', this.status);
+
+      const currentPath = this.getCurrentPath();
+      if (!currentPath) {
+        throw new Error(`No path configured for current platform: ${process.platform}`);
+      }
+
+      if (this.config.type === 'file') {
+        await this.monitorFile(currentPath);
+      } else if (this.config.type === 'directory') {
+        await this.monitorDirectory(currentPath);
+      }
+
+      this.status = 'connected';
+      this.emit('status', this.status);
+      this.emit('initialized');
+    } catch (error) {
+      this.status = 'error';
+      this.emit('status', this.status);
+      this.emit('error', error);
+      throw error;
+    }
+  }
+
+  private getCurrentPath(): string {
+    const platform = process.platform as keyof CrossPlatformPath;
+    return this.config.paths[platform] || '';
+  }
+
+  private async monitorFile(filePath: string): Promise<void> {
+            const watcher = watch(filePath, (eventType: string) => {
+      if (eventType === 'change') {
+        this.processFile(filePath);
+      }
+    });
+    
+    this.watchers.push(watcher);
+    await this.processFile(filePath, true);
+  }
+
+  private async monitorDirectory(dirPath: string): Promise<void> {
+    // Implementation for directory monitoring
+          const watcher = watch(dirPath, { recursive: true }, (eventType: string, filename: string | null) => {
+      if (eventType === 'change' && filename) {
+        const filePath = path.join(dirPath, filename);
+        this.processFile(filePath);
+      }
+    });
+    
+    this.watchers.push(watcher);
+  }
+
+  private async processFile(filePath: string, isInitialLoad = false): Promise<void> {
+    try {
+      const content = await fs.readFile(filePath, 'utf-8');
+      const lines = content.split('\n').filter(line => line.trim());
+
+      for (const line of lines) {
+        const entry = this.parser.parse(line, this.config);
+        if (entry) {
+          if (entry.timestamp <= this.lastProcessedTimestamp && !isInitialLoad) {
+            continue;
+          }
+
+          this.emit('log', entry);
+          
+          if (entry.timestamp > this.lastProcessedTimestamp) {
+            this.lastProcessedTimestamp = entry.timestamp;
+          }
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to process file:', filePath, error);
+    }
+  }
+
+  getConfig(): AgentConfig {
+    return {
+      enabled: this.config.enabled,
+      paths: this.config.paths,
+      pollingInterval: this.config.polling_interval,
+      privacyLevel: this.config.privacy_level
+    };
+  }
+
+  getStatus(): AgentStatus {
+    return this.status;
+  }
+
+  getCapabilities() {
+    return {
+      realTime: true,
+      historical: true,
+      filtering: true,
+      mcpNative: false,
+      authentication: false,
+      crossPlatform: true,
+      customizable: true
+    };
+  }
+
+  async updateConfig(newConfig: Partial<AgentConfig>): Promise<void> {
+    // Custom source configs are managed by CustomSourceManager
+    this.emit('config-updated', newConfig);
+  }
+
+  async disconnect(): Promise<void> {
+    this.status = 'disconnecting';
+    this.emit('status', this.status);
+
+    for (const watcher of this.watchers) {
+      watcher.close();
+    }
+    this.watchers = [];
+
+    this.status = 'disconnected';
+    this.emit('status', this.status);
+    this.emit('disconnected');
+  }
+}
+
+/**
+ * Default JSON Log Parser
+ */
+class JSONLogParser implements CustomLogParser {
+  parse(line: string, config: CustomSourceConfig): LogEntry | null {
+    try {
+      const data = JSON.parse(line);
+      
+      return {
+        id: `custom-${config.id}-${Date.now()}`,
+        timestamp: new Date(data.timestamp || data.time || Date.now()),
+        level: this.mapLogLevel(data.level || data.severity || 'info', config),
+        message: data.message || data.msg || line,
+        agent: {
+          name: `custom-${config.id}`,
+          version: '1.0.0',
+          type: 'custom'
+        },
+        source: {
+          file: config.paths[process.platform as keyof CrossPlatformPath] || '',
+          line: data.line || null,
+          function: data.function || null
+        },
+        metadata: {
+          sourceId: config.id,
+          format: 'json',
+          mcp_native: false,
+          ...data
+        },
+        raw: data
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  validate(config: CustomSourceConfig): ValidationResult {
+    return { valid: true, errors: [], warnings: [] };
+  }
+
+  private mapLogLevel(level: string, config: CustomSourceConfig): LogLevel {
+    if (config.parser_config?.level_mapping) {
+      const mapped = config.parser_config.level_mapping[level.toLowerCase()];
+      if (mapped) return mapped;
+    }
+
+    const normalized = level.toLowerCase();
+    switch (normalized) {
+      case 'debug': return 'debug';
+      case 'info': return 'info';
+      case 'warn': 
+      case 'warning': return 'warn';
+      case 'error': return 'error';
+      case 'fatal': 
+      case 'critical': return 'fatal';
+      default: return 'info';
+    }
+  }
+}
+
+/**
+ * Default JSON Lines Log Parser
+ */
+class JSONLinesLogParser extends JSONLogParser {
+  // Inherits from JSONLogParser, same implementation
+}
+
+/**
+ * Default Text Log Parser
+ */
+class TextLogParser implements CustomLogParser {
+  parse(line: string, config: CustomSourceConfig): LogEntry | null {
+    if (!line.trim()) return null;
+
+    // Use regex patterns if configured
+    if (config.parser_config?.regex_patterns) {
+      for (const pattern of config.parser_config.regex_patterns) {
+        const regex = new RegExp(pattern);
+        const match = line.match(regex);
+        if (match) {
+          return this.createEntryFromMatch(match, line, config);
+        }
+      }
+    }
+
+    // Fallback: treat as simple text log
+    return {
+      id: `custom-${config.id}-${Date.now()}`,
+      timestamp: new Date(),
+      level: 'info',
+      message: line,
+      agent: {
+        name: `custom-${config.id}`,
+        version: '1.0.0',
+        type: 'custom'
+      },
+      source: {
+        file: config.paths[process.platform as keyof CrossPlatformPath] || '',
+        line: null,
+        function: null
+      },
+      metadata: {
+        sourceId: config.id,
+        format: 'text',
+        mcp_native: false
+      },
+      raw: line
+    };
+  }
+
+  validate(config: CustomSourceConfig): ValidationResult {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+
+    if (config.parser_config?.regex_patterns) {
+      for (const pattern of config.parser_config.regex_patterns) {
+        try {
+          new RegExp(pattern);
+        } catch {
+          errors.push(`Invalid regex pattern: ${pattern}`);
+        }
+      }
+    }
+
+    return { valid: errors.length === 0, errors, warnings };
+  }
+
+  private createEntryFromMatch(match: RegExpMatchArray, line: string, config: CustomSourceConfig): LogEntry {
+    // Extract common fields from regex groups
+    const timestamp = match[1] ? new Date(match[1]) : new Date();
+    const level = match[2] || 'info';
+    const message = match[3] || line;
+
+    return {
+      id: `custom-${config.id}-${Date.now()}`,
+      timestamp,
+      level: this.mapLogLevel(level, config),
+      message,
+      agent: {
+        name: `custom-${config.id}`,
+        version: '1.0.0',
+        type: 'custom'
+      },
+      source: {
+        file: config.paths[process.platform as keyof CrossPlatformPath] || '',
+        line: null,
+        function: null
+      },
+      metadata: {
+        sourceId: config.id,
+        format: 'text',
+        regexMatch: match,
+        mcp_native: false
+      },
+      raw: line
+    };
+  }
+
+  private mapLogLevel(level: string, config: CustomSourceConfig): LogLevel {
+    if (config.parser_config?.level_mapping) {
+      const mapped = config.parser_config.level_mapping[level.toLowerCase()];
+      if (mapped) return mapped;
+    }
+
+    const normalized = level.toLowerCase();
+    switch (normalized) {
+      case 'debug': return 'debug';
+      case 'info': return 'info';
+      case 'warn': 
+      case 'warning': return 'warn';
+      case 'error': return 'error';
+      case 'fatal': 
+      case 'critical': return 'fatal';
+      default: return 'info';
+    }
+  }
+}
+
+/**
+ * Default CSV Log Parser
+ */
+class CSVLogParser implements CustomLogParser {
+  parse(line: string, config: CustomSourceConfig): LogEntry | null {
+    try {
+      const delimiter = config.parser_config?.delimiter || ',';
+      const fields = line.split(delimiter).map(field => field.trim().replace(/^"(.*)"$/, '$1'));
+      
+      if (fields.length < 3) return null; // Need at least timestamp, level, message
+
+      return {
+        id: `custom-${config.id}-${Date.now()}`,
+        timestamp: new Date(fields[0]),
+        level: this.mapLogLevel(fields[1], config),
+        message: fields[2],
+        agent: {
+          name: `custom-${config.id}`,
+          version: '1.0.0',
+          type: 'custom'
+        },
+        source: {
+          file: config.paths[process.platform as keyof CrossPlatformPath] || '',
+          line: null,
+          function: null
+        },
+        metadata: {
+          sourceId: config.id,
+          format: 'csv',
+          csvFields: fields,
+          mcp_native: false
+        },
+        raw: line
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  validate(config: CustomSourceConfig): ValidationResult {
+    return { valid: true, errors: [], warnings: [] };
+  }
+
+  private mapLogLevel(level: string, config: CustomSourceConfig): LogLevel {
+    if (config.parser_config?.level_mapping) {
+      const mapped = config.parser_config.level_mapping[level.toLowerCase()];
+      if (mapped) return mapped;
+    }
+
+    const normalized = level.toLowerCase();
+    switch (normalized) {
+      case 'debug': return 'debug';
+      case 'info': return 'info';
+      case 'warn': 
+      case 'warning': return 'warn';
+      case 'error': return 'error';
+      case 'fatal': 
+      case 'critical': return 'fatal';
+      default: return 'info';
+    }
+  }
+} 

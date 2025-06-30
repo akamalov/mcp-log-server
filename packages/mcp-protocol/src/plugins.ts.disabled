@@ -1,0 +1,686 @@
+import * as fs from 'fs/promises';
+import * as path from 'path';
+import { EventEmitter } from 'events';
+import { Worker } from 'worker_threads';
+import { 
+  LogEntry, 
+  AgentAdapter 
+} from '@mcp-log-server/types/agent';
+import { CustomLogParser, CustomSourceConfig, ValidationResult } from './custom-sources';
+
+/**
+ * Plugin types
+ */
+export type PluginType = 'parser' | 'processor' | 'filter' | 'transformer' | 'exporter';
+
+/**
+ * Plugin configuration
+ */
+export interface PluginConfig {
+  id: string;
+  name: string;
+  version: string;
+  type: PluginType;
+  description?: string;
+  author?: string;
+  license?: string;
+  entry: string; // Main entry file
+  dependencies?: string[];
+  permissions?: PluginPermissions;
+  sandboxed?: boolean;
+  enabled: boolean;
+  config?: Record<string, any>;
+}
+
+/**
+ * Plugin permissions
+ */
+export interface PluginPermissions {
+  filesystem?: {
+    read?: string[];
+    write?: string[];
+  };
+  network?: {
+    hosts?: string[];
+    ports?: number[];
+  };
+  process?: {
+    spawn?: boolean;
+    kill?: boolean;
+  };
+  modules?: string[];
+}
+
+/**
+ * Plugin execution context
+ */
+export interface PluginContext {
+  config: Record<string, any>;
+  logger: PluginLogger;
+  storage: PluginStorage;
+  events: PluginEventEmitter;
+}
+
+/**
+ * Plugin logger interface
+ */
+export interface PluginLogger {
+  debug(message: string, ...args: any[]): void;
+  info(message: string, ...args: any[]): void;
+  warn(message: string, ...args: any[]): void;
+  error(message: string, ...args: any[]): void;
+}
+
+/**
+ * Plugin storage interface
+ */
+export interface PluginStorage {
+  get(key: string): Promise<any>;
+  set(key: string, value: any): Promise<void>;
+  delete(key: string): Promise<void>;
+  clear(): Promise<void>;
+}
+
+/**
+ * Plugin event emitter interface
+ */
+export interface PluginEventEmitter {
+  emit(event: string, ...args: any[]): void;
+  on(event: string, listener: (...args: any[]) => void): void;
+  off(event: string, listener: (...args: any[]) => void): void;
+}
+
+/**
+ * Plugin instance
+ */
+export interface PluginInstance {
+  id: string;
+  config: PluginConfig;
+  context: PluginContext;
+  module?: any;
+  worker?: Worker;
+  status: 'loading' | 'loaded' | 'error' | 'disabled';
+  lastError?: Error;
+}
+
+/**
+ * Plugin API interface that plugins must implement
+ */
+export interface PluginAPI {
+  /**
+   * Initialize the plugin with context
+   */
+  initialize(context: PluginContext): Promise<void>;
+
+  /**
+   * Process a log entry (for processor plugins)
+   */
+  process?(entry: LogEntry): Promise<LogEntry | LogEntry[] | null>;
+
+  /**
+   * Parse a log line (for parser plugins)
+   */
+  parse?(line: string, config: CustomSourceConfig): Promise<LogEntry | null>;
+
+  /**
+   * Filter a log entry (for filter plugins)
+   */
+  filter?(entry: LogEntry): Promise<boolean>;
+
+  /**
+   * Transform a log entry (for transformer plugins)
+   */
+  transform?(entry: LogEntry): Promise<LogEntry>;
+
+  /**
+   * Export log entries (for exporter plugins)
+   */
+  export?(entries: LogEntry[]): Promise<void>;
+
+  /**
+   * Cleanup plugin resources
+   */
+  cleanup?(): Promise<void>;
+}
+
+/**
+ * Plugin Manager
+ * 
+ * Manages plugin lifecycle, loading, sandboxing, and execution.
+ */
+export class PluginManager extends EventEmitter {
+  private plugins: Map<string, PluginInstance> = new Map();
+  private pluginPaths: string[] = [];
+  private sandboxEnabled: boolean;
+  private storageDir: string;
+  private logger: PluginLogger;
+
+  constructor(options: {
+    pluginPaths: string[];
+    sandboxEnabled?: boolean;
+    storageDir: string;
+    logger: PluginLogger;
+  }) {
+    super();
+    this.pluginPaths = options.pluginPaths;
+    this.sandboxEnabled = options.sandboxEnabled ?? true;
+    this.storageDir = options.storageDir;
+    this.logger = options.logger;
+  }
+
+  /**
+   * Initialize plugin manager
+   */
+  async initialize(): Promise<void> {
+    try {
+      // Ensure storage directory exists
+      await fs.mkdir(this.storageDir, { recursive: true });
+
+      // Discover and load plugins
+      await this.discoverPlugins();
+      await this.loadPlugins();
+
+      this.emit('initialized', this.plugins.size);
+    } catch (error) {
+      this.emit('error', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Discover plugins in configured paths
+   */
+  private async discoverPlugins(): Promise<void> {
+    for (const pluginPath of this.pluginPaths) {
+      try {
+        const items = await fs.readdir(pluginPath);
+        
+        for (const item of items) {
+          const itemPath = path.join(pluginPath, item);
+          const stats = await fs.stat(itemPath);
+          
+          if (stats.isDirectory()) {
+            await this.discoverPluginInDirectory(itemPath);
+          } else if (item.endsWith('.plugin.js') || item.endsWith('.plugin.ts')) {
+            await this.discoverPluginFile(itemPath);
+          }
+        }
+      } catch (error) {
+        this.logger.warn(`Failed to discover plugins in ${pluginPath}:`, error);
+      }
+    }
+  }
+
+  /**
+   * Discover plugin in directory
+   */
+  private async discoverPluginInDirectory(pluginDir: string): Promise<void> {
+    try {
+      const manifestPath = path.join(pluginDir, 'plugin.json');
+      const manifestContent = await fs.readFile(manifestPath, 'utf-8');
+      const config: PluginConfig = JSON.parse(manifestContent);
+      
+      // Resolve entry path
+      config.entry = path.resolve(pluginDir, config.entry);
+      
+      const validation = this.validatePluginConfig(config);
+      if (validation.valid) {
+        await this.registerPlugin(config);
+      } else {
+        this.logger.error(`Invalid plugin configuration ${config.id}:`, validation.errors);
+      }
+    } catch (error) {
+      this.logger.warn(`Failed to discover plugin in ${pluginDir}:`, error);
+    }
+  }
+
+  /**
+   * Discover standalone plugin file
+   */
+  private async discoverPluginFile(pluginFile: string): Promise<void> {
+    try {
+      // Extract plugin metadata from file header comments
+      const content = await fs.readFile(pluginFile, 'utf-8');
+      const metadata = this.extractPluginMetadata(content);
+      
+      if (metadata) {
+        const config: PluginConfig = {
+          ...metadata,
+          entry: pluginFile,
+          enabled: true
+        };
+        
+        const validation = this.validatePluginConfig(config);
+        if (validation.valid) {
+          await this.registerPlugin(config);
+        }
+      }
+    } catch (error) {
+      this.logger.warn(`Failed to discover plugin file ${pluginFile}:`, error);
+    }
+  }
+
+  /**
+   * Extract plugin metadata from file comments
+   */
+  private extractPluginMetadata(content: string): Partial<PluginConfig> | null {
+    const metadataMatch = content.match(/\/\*\*\s*@plugin\s+([\s\S]*?)\*\//);
+    if (!metadataMatch) return null;
+
+    const metadataString = metadataMatch[1];
+    const metadata: Partial<PluginConfig> = {};
+
+    // Parse metadata fields
+    const fields = {
+      id: /@id\s+([^\s]+)/,
+      name: /@name\s+(.+)/,
+      version: /@version\s+([^\s]+)/,
+      type: /@type\s+([^\s]+)/,
+      description: /@description\s+(.+)/,
+      author: /@author\s+(.+)/,
+      license: /@license\s+([^\s]+)/
+    };
+
+    for (const [field, regex] of Object.entries(fields)) {
+      const match = metadataString.match(regex);
+      if (match) {
+        (metadata as any)[field] = match[1].trim();
+      }
+    }
+
+    return metadata.id ? metadata : null;
+  }
+
+  /**
+   * Validate plugin configuration
+   */
+  private validatePluginConfig(config: PluginConfig): ValidationResult {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+
+    // Required fields
+    if (!config.id) errors.push('Missing required field: id');
+    if (!config.name) errors.push('Missing required field: name');
+    if (!config.version) errors.push('Missing required field: version');
+    if (!config.type) errors.push('Missing required field: type');
+    if (!config.entry) errors.push('Missing required field: entry');
+
+    // Type validation
+    if (config.type && !['parser', 'processor', 'filter', 'transformer', 'exporter'].includes(config.type)) {
+      errors.push(`Invalid plugin type: ${config.type}`);
+    }
+
+    // Entry file validation
+    if (config.entry && !config.entry.endsWith('.js') && !config.entry.endsWith('.ts')) {
+      warnings.push('Plugin entry should be a .js or .ts file');
+    }
+
+    // Permission validation
+    if (config.permissions) {
+      if (config.permissions.filesystem?.read?.some(p => path.isAbsolute(p))) {
+        warnings.push('Absolute filesystem read paths detected');
+      }
+      if (config.permissions.filesystem?.write?.some(p => path.isAbsolute(p))) {
+        warnings.push('Absolute filesystem write paths detected');
+      }
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors,
+      warnings
+    };
+  }
+
+  /**
+   * Register plugin
+   */
+  private async registerPlugin(config: PluginConfig): Promise<void> {
+    if (this.plugins.has(config.id)) {
+      this.logger.warn(`Plugin ${config.id} already registered, skipping`);
+      return;
+    }
+
+    const context = await this.createPluginContext(config);
+    const instance: PluginInstance = {
+      id: config.id,
+      config,
+      context,
+      status: 'loading'
+    };
+
+    this.plugins.set(config.id, instance);
+    this.emit('plugin-registered', config.id);
+  }
+
+  /**
+   * Create plugin execution context
+   */
+  private async createPluginContext(config: PluginConfig): Promise<PluginContext> {
+    const storage = new PluginFileStorage(
+      path.join(this.storageDir, config.id)
+    );
+
+    const logger: PluginLogger = {
+      debug: (message, ...args) => this.logger.debug(`[${config.id}] ${message}`, ...args),
+      info: (message, ...args) => this.logger.info(`[${config.id}] ${message}`, ...args),
+      warn: (message, ...args) => this.logger.warn(`[${config.id}] ${message}`, ...args),
+      error: (message, ...args) => this.logger.error(`[${config.id}] ${message}`, ...args),
+    };
+
+    const events = new EventEmitter() as PluginEventEmitter;
+
+    return {
+      config: config.config || {},
+      logger,
+      storage,
+      events
+    };
+  }
+
+  /**
+   * Load all registered plugins
+   */
+  private async loadPlugins(): Promise<void> {
+    for (const instance of this.plugins.values()) {
+      if (instance.config.enabled) {
+        try {
+          await this.loadPlugin(instance);
+        } catch (error) {
+          this.logger.error(`Failed to load plugin ${instance.id}:`, error);
+          instance.status = 'error';
+          instance.lastError = error as Error;
+        }
+      } else {
+        instance.status = 'disabled';
+      }
+    }
+  }
+
+  /**
+   * Load individual plugin
+   */
+  private async loadPlugin(instance: PluginInstance): Promise<void> {
+    if (instance.config.sandboxed && this.sandboxEnabled) {
+      await this.loadPluginSandboxed(instance);
+    } else {
+      await this.loadPluginDirect(instance);
+    }
+
+    instance.status = 'loaded';
+    this.emit('plugin-loaded', instance.id);
+  }
+
+  /**
+   * Load plugin in sandbox (worker thread)
+   */
+  private async loadPluginSandboxed(instance: PluginInstance): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const worker = new Worker(`
+        const { parentPort } = require('worker_threads');
+        const pluginModule = require('${instance.config.entry}');
+        
+        parentPort.on('message', async (message) => {
+          try {
+            const { method, args } = message;
+            const result = await pluginModule[method](...args);
+            parentPort.postMessage({ success: true, result });
+          } catch (error) {
+            parentPort.postMessage({ success: false, error: error.message });
+          }
+        });
+      `, { eval: true });
+
+      worker.on('error', reject);
+      worker.on('exit', (code) => {
+        if (code !== 0) {
+          reject(new Error(`Worker stopped with exit code ${code}`));
+        }
+      });
+
+      instance.worker = worker;
+      resolve();
+    });
+  }
+
+  /**
+   * Load plugin directly (same thread)
+   */
+  private async loadPluginDirect(instance: PluginInstance): Promise<void> {
+    try {
+      // Clear require cache to allow hot reloading
+      delete require.cache[require.resolve(instance.config.entry)];
+      
+      const pluginModule = require(instance.config.entry);
+      instance.module = pluginModule;
+
+      // Initialize plugin if it has an initialize method
+      if (pluginModule.initialize) {
+        await pluginModule.initialize(instance.context);
+      }
+    } catch (error) {
+      throw new Error(`Failed to load plugin module: ${error}`);
+    }
+  }
+
+  /**
+   * Execute plugin method
+   */
+  async executePlugin(pluginId: string, method: string, ...args: any[]): Promise<any> {
+    const instance = this.plugins.get(pluginId);
+    if (!instance) {
+      throw new Error(`Plugin not found: ${pluginId}`);
+    }
+
+    if (instance.status !== 'loaded') {
+      throw new Error(`Plugin not loaded: ${pluginId}`);
+    }
+
+    try {
+      if (instance.worker) {
+        return await this.executePluginSandboxed(instance, method, args);
+      } else if (instance.module) {
+        return await this.executePluginDirect(instance, method, args);
+      } else {
+        throw new Error(`Plugin has no executable module: ${pluginId}`);
+      }
+    } catch (error) {
+      this.logger.error(`Plugin execution error in ${pluginId}.${method}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Execute plugin method in sandbox
+   */
+  private async executePluginSandboxed(instance: PluginInstance, method: string, args: any[]): Promise<any> {
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Plugin execution timeout'));
+      }, 5000);
+
+      instance.worker!.once('message', (message) => {
+        clearTimeout(timeout);
+        if (message.success) {
+          resolve(message.result);
+        } else {
+          reject(new Error(message.error));
+        }
+      });
+
+      instance.worker!.postMessage({ method, args });
+    });
+  }
+
+  /**
+   * Execute plugin method directly
+   */
+  private async executePluginDirect(instance: PluginInstance, method: string, args: any[]): Promise<any> {
+    if (!instance.module[method]) {
+      throw new Error(`Method ${method} not found in plugin ${instance.id}`);
+    }
+
+    return await instance.module[method](...args);
+  }
+
+  /**
+   * Get plugin by ID
+   */
+  getPlugin(id: string): PluginInstance | undefined {
+    return this.plugins.get(id);
+  }
+
+  /**
+   * Get all plugins
+   */
+  getPlugins(): PluginInstance[] {
+    return Array.from(this.plugins.values());
+  }
+
+  /**
+   * Get plugins by type
+   */
+  getPluginsByType(type: PluginType): PluginInstance[] {
+    return Array.from(this.plugins.values()).filter(p => p.config.type === type);
+  }
+
+  /**
+   * Enable plugin
+   */
+  async enablePlugin(id: string): Promise<void> {
+    const instance = this.plugins.get(id);
+    if (!instance) {
+      throw new Error(`Plugin not found: ${id}`);
+    }
+
+    instance.config.enabled = true;
+    if (instance.status === 'disabled') {
+      await this.loadPlugin(instance);
+    }
+  }
+
+  /**
+   * Disable plugin
+   */
+  async disablePlugin(id: string): Promise<void> {
+    const instance = this.plugins.get(id);
+    if (!instance) {
+      throw new Error(`Plugin not found: ${id}`);
+    }
+
+    instance.config.enabled = false;
+    await this.unloadPlugin(instance);
+    instance.status = 'disabled';
+  }
+
+  /**
+   * Unload plugin
+   */
+  private async unloadPlugin(instance: PluginInstance): Promise<void> {
+    try {
+      // Call cleanup if available
+      if (instance.module?.cleanup) {
+        await instance.module.cleanup();
+      }
+
+      // Terminate worker if sandboxed
+      if (instance.worker) {
+        await instance.worker.terminate();
+        instance.worker = undefined;
+      }
+
+      // Clear module reference
+      if (instance.module) {
+        delete require.cache[require.resolve(instance.config.entry)];
+        instance.module = undefined;
+      }
+    } catch (error) {
+      this.logger.warn(`Error during plugin unload ${instance.id}:`, error);
+    }
+  }
+
+  /**
+   * Reload plugin
+   */
+  async reloadPlugin(id: string): Promise<void> {
+    const instance = this.plugins.get(id);
+    if (!instance) {
+      throw new Error(`Plugin not found: ${id}`);
+    }
+
+    await this.unloadPlugin(instance);
+    
+    if (instance.config.enabled) {
+      await this.loadPlugin(instance);
+    }
+
+    this.emit('plugin-reloaded', id);
+  }
+
+  /**
+   * Shutdown plugin manager
+   */
+  async shutdown(): Promise<void> {
+    for (const instance of this.plugins.values()) {
+      await this.unloadPlugin(instance);
+    }
+    
+    this.plugins.clear();
+    this.emit('shutdown');
+  }
+}
+
+/**
+ * Plugin file storage implementation
+ */
+class PluginFileStorage implements PluginStorage {
+  private storageDir: string;
+
+  constructor(storageDir: string) {
+    this.storageDir = storageDir;
+  }
+
+  async get(key: string): Promise<any> {
+    try {
+      await fs.mkdir(this.storageDir, { recursive: true });
+      const filePath = path.join(this.storageDir, `${key}.json`);
+      const content = await fs.readFile(filePath, 'utf-8');
+      return JSON.parse(content);
+    } catch (error) {
+      if ((error as any).code === 'ENOENT') {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async set(key: string, value: any): Promise<void> {
+    await fs.mkdir(this.storageDir, { recursive: true });
+    const filePath = path.join(this.storageDir, `${key}.json`);
+    await fs.writeFile(filePath, JSON.stringify(value, null, 2));
+  }
+
+  async delete(key: string): Promise<void> {
+    try {
+      const filePath = path.join(this.storageDir, `${key}.json`);
+      await fs.unlink(filePath);
+    } catch (error) {
+      if ((error as any).code !== 'ENOENT') {
+        throw error;
+      }
+    }
+  }
+
+  async clear(): Promise<void> {
+    try {
+      const files = await fs.readdir(this.storageDir);
+      await Promise.all(
+        files.map(file => fs.unlink(path.join(this.storageDir, file)))
+      );
+    } catch (error) {
+      if ((error as any).code !== 'ENOENT') {
+        throw error;
+      }
+    }
+  }
+} 

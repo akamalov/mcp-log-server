@@ -48,6 +48,7 @@ export const AgentConfigSchema = z.object({
   parser: z.string().optional(), // custom parser name
   filters: z.array(z.string()).optional(),
   metadata: z.record(z.unknown()).optional(),
+  paths: z.record(z.string()).optional(), // platform-specific paths
 });
 
 export type AgentType = z.infer<typeof AgentTypeSchema>;
@@ -72,7 +73,7 @@ export const LogSourceSchema = z.object({
   agentId: z.string(),
   pollingInterval: z.number().optional(), // milliseconds
   maxFileSize: z.number().optional(), // bytes
-  encoding: z.string().default("utf-8"),
+  encoding: z.string().default("utf-8").optional(),
   metadata: z.record(z.unknown()).optional(),
 });
 
@@ -200,4 +201,48 @@ export const AgentStatusSchema = z.object({
   details: z.string().optional(),
 });
 
-export type AgentStatus = z.infer<typeof AgentStatusSchema>; 
+export type AgentStatus = z.infer<typeof AgentStatusSchema>;
+
+// Cross-platform path types (adding the missing types)
+export interface CrossPlatformPath {
+  linux: string;
+  darwin: string; 
+  win32: string;
+}
+
+// Stream management types
+export interface StreamManager {
+  createStream(sourceId: string): LogStream;
+  getStream(sourceId: string): LogStream | undefined;
+  closeStream(sourceId: string): Promise<void>;
+  getAllStreams(): LogStream[];
+}
+
+// Query options for complex queries
+export interface QueryOptions {
+  includeMetadata?: boolean;
+  includeRaw?: boolean;
+  maxResults?: number;
+  timeout?: number;
+}
+
+// Aggregation result types
+export interface AggregationResult {
+  total: number;
+  byLevel: Record<LogLevel, number>;
+  byAgent: Record<string, number>;
+  bySource: Record<string, number>;
+  timeRange: {
+    start: string;
+    end: string;
+  };
+}
+
+// Real-time subscription interface
+export interface RealtimeSubscription {
+  id: string;
+  query: LogQuery;
+  onUpdate: (event: LogUpdateEvent) => void;
+  onError: (error: Error) => void;
+  unsubscribe(): Promise<void>;
+} 

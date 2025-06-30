@@ -1,0 +1,686 @@
+import * as fs from 'fs/promises';
+import { watch } from 'fs';
+import * as path from 'path';
+import { EventEmitter } from 'events';
+import { 
+  AgentAdapter, 
+  LogEntry, 
+  AgentConfig, 
+  LogLevel, 
+  AgentStatus,
+  CrossPlatformPath 
+} from '@mcp-log-server/types/agent';
+
+/**
+ * VS Code Copilot log entry interface
+ */
+interface VSCodeLogEntry {
+  timestamp?: string;
+  pid?: number;
+  level?: string;
+  message?: string;
+  extensionId?: string;
+  source?: string;
+  command?: string;
+  requestId?: string;
+  completionData?: {
+    prompt: string;
+    completion: string;
+    language: string;
+    file: string;
+    line: number;
+    column: number;
+  };
+  errorData?: {
+    code: string;
+    message: string;
+    stack?: string;
+  };
+}
+
+/**
+ * VS Code Copilot Agent Adapter
+ * 
+ * Handles log integration for VS Code Copilot with full format conversion.
+ * Requires GitHub authentication and supports extension API integration.
+ */
+export class VSCodeAdapter extends EventEmitter implements AgentAdapter {
+  public readonly agentType: AgentType = 'vscode-copilot';
+  public readonly name = 'vscode-copilot';
+  public readonly version = '1.0.0';
+  public readonly supportsMCP = false; // No MCP compliance, requires full conversion
+  
+  private config: AgentConfig;
+  private status: AgentStatus = 'disconnected';
+  private watchers: ReturnType<typeof watch>[] = [];
+  private lastProcessedTimestamp: Date = new Date(0);
+  private filePositions: Map<string, number> = new Map();
+  private authenticatedExtensions: Set<string> = new Set();
+
+  constructor(config: AgentConfig) {
+    super();
+    this.config = {
+      ...config,
+      paths: this.resolvePlatformPaths(),
+    };
+  }
+
+  /**
+   * Resolve VS Code log paths for current platform
+   */
+  private resolvePlatformPaths(): CrossPlatformPath {
+    const platform = process.platform;
+    const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+
+    switch (platform) {
+      case 'darwin':
+        return {
+          linux: '',
+          darwin: path.join(homeDir, 'Library/Application Support/Code/logs/'),
+          win32: ''
+        };
+      case 'win32':
+        const appData = process.env.APPDATA || '';
+        return {
+          linux: '',
+          darwin: '',
+          win32: path.join(appData, 'Code', 'logs', '')
+        };
+      case 'linux':
+      default:
+        return {
+          linux: path.join(homeDir, '.config/Code/logs/'),
+          darwin: '',
+          win32: ''
+        };
+    }
+  }
+
+  /**
+   * Get current platform log path
+   */
+  private getCurrentLogPath(): string {
+    const platform = process.platform as keyof CrossPlatformPath;
+    return this.config.paths[platform] || '';
+  }
+
+  /**
+   * Get extensions directory path
+   */
+  private getExtensionsPath(): string {
+    const platform = process.platform;
+    const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+
+    switch (platform) {
+      case 'darwin':
+        return path.join(homeDir, '.vscode/extensions/');
+      case 'win32':
+        return path.join(homeDir, '.vscode', 'extensions');
+      case 'linux':
+      default:
+        return path.join(homeDir, '.vscode/extensions/');
+    }
+  }
+
+  /**
+   * Initialize the VS Code adapter
+   */
+  async initialize(): Promise<void> {
+    try {
+      this.status = 'connecting';
+      this.emit('status', this.status);
+
+      const logPath = this.getCurrentLogPath();
+      if (!logPath) {
+        throw new Error(`Unsupported platform: ${process.platform}`);
+      }
+
+      // Check for Copilot extension
+      await this.checkCopilotExtension();
+
+      // Ensure log directory exists
+      await this.ensureLogDirectory(logPath);
+
+      // Start monitoring log files
+      await this.startFileMonitoring(logPath);
+
+      // Load existing log entries
+      await this.loadExistingLogs(logPath);
+
+      this.status = 'connected';
+      this.emit('status', this.status);
+      this.emit('initialized');
+
+    } catch (error) {
+      this.status = 'error';
+      this.emit('status', this.status);
+      this.emit('error', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Check if GitHub Copilot extension is installed
+   */
+  private async checkCopilotExtension(): Promise<void> {
+    try {
+      const extensionsPath = this.getExtensionsPath();
+      const extensions = await fs.readdir(extensionsPath);
+      
+      const copilotExtensions = extensions.filter(ext => 
+        ext.includes('github.copilot') || 
+        ext.includes('copilot')
+      );
+
+      if (copilotExtensions.length === 0) {
+        console.warn('GitHub Copilot extension not found in VS Code extensions');
+      } else {
+        this.authenticatedExtensions = new Set(copilotExtensions);
+        console.info(`Found Copilot extensions: ${copilotExtensions.join(', ')}`);
+      }
+    } catch (error) {
+      console.warn('Failed to check Copilot extension:', error);
+    }
+  }
+
+  /**
+   * Ensure log directory exists
+   */
+  private async ensureLogDirectory(logPath: string): Promise<void> {
+    try {
+      await fs.access(logPath);
+    } catch {
+      console.warn(`VS Code log directory not found: ${logPath}`);
+    }
+  }
+
+  /**
+   * Start monitoring log files for changes
+   */
+  private async startFileMonitoring(logPath: string): Promise<void> {
+    try {
+      // Monitor current session logs
+      const currentSessionPath = await this.findCurrentSessionPath(logPath);
+      if (currentSessionPath) {
+        await this.monitorSessionDirectory(currentSessionPath);
+      }
+
+      // Also monitor the main logs directory for new sessions
+              const mainWatcher = watch(logPath, (eventType: string, filename: string | null) => {
+        if (eventType === 'rename' && filename) {
+          const sessionPath = path.join(logPath, filename);
+          this.monitorSessionDirectory(sessionPath);
+        }
+      });
+      
+      this.watchers.push(mainWatcher);
+
+    } catch (error) {
+      console.warn('Failed to start file monitoring:', error);
+    }
+  }
+
+  /**
+   * Find current VS Code session log directory
+   */
+  private async findCurrentSessionPath(logPath: string): Promise<string | null> {
+    try {
+      const sessions = await fs.readdir(logPath);
+      const sessionDirs = sessions.filter(async (session) => {
+        const sessionPath = path.join(logPath, session);
+        const stats = await fs.stat(sessionPath);
+        return stats.isDirectory();
+      });
+
+      if (sessionDirs.length === 0) return null;
+
+      // Find the most recent session directory
+      let mostRecent = sessionDirs[0];
+      let mostRecentTime = 0;
+
+      for (const session of sessionDirs) {
+        const sessionPath = path.join(logPath, session);
+        const stats = await fs.stat(sessionPath);
+        if (stats.mtime.getTime() > mostRecentTime) {
+          mostRecentTime = stats.mtime.getTime();
+          mostRecent = session;
+        }
+      }
+
+      return path.join(logPath, mostRecent);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Monitor a VS Code session directory
+   */
+  private async monitorSessionDirectory(sessionPath: string): Promise<void> {
+    try {
+      const files = await fs.readdir(sessionPath);
+      const logFiles = files.filter(file => 
+        file.endsWith('.log') || 
+        file.includes('copilot') ||
+        file.includes('extension')
+      );
+
+      for (const file of logFiles) {
+        const filePath = path.join(sessionPath, file);
+                  const watcher = watch(filePath, (eventType: string) => {
+          if (eventType === 'change') {
+            this.processLogFile(filePath);
+          }
+        });
+        
+        this.watchers.push(watcher);
+      }
+
+      // Watch directory for new log files
+                const dirWatcher = watch(sessionPath, (eventType: string, filename: string | null) => {
+        if (eventType === 'rename' && filename && this.isRelevantLogFile(filename)) {
+          const filePath = path.join(sessionPath, filename);
+          this.processLogFile(filePath);
+        }
+      });
+      
+      this.watchers.push(dirWatcher);
+
+    } catch (error) {
+      console.warn('Failed to monitor session directory:', sessionPath, error);
+    }
+  }
+
+  /**
+   * Check if file is relevant for Copilot monitoring
+   */
+  private isRelevantLogFile(filename: string): boolean {
+    return filename.endsWith('.log') || 
+           filename.includes('copilot') ||
+           filename.includes('extension') ||
+           filename.includes('github');
+  }
+
+  /**
+   * Load existing log entries
+   */
+  private async loadExistingLogs(logPath: string): Promise<void> {
+    try {
+      const sessionPath = await this.findCurrentSessionPath(logPath);
+      if (!sessionPath) return;
+
+      const files = await fs.readdir(sessionPath);
+      const logFiles = files.filter(file => this.isRelevantLogFile(file));
+
+      for (const file of logFiles) {
+        const filePath = path.join(sessionPath, file);
+        await this.processLogFile(filePath, true);
+      }
+
+    } catch (error) {
+      console.warn('Failed to load existing logs:', error);
+    }
+  }
+
+  /**
+   * Process a log file and extract entries
+   */
+  private async processLogFile(filePath: string, isInitialLoad = false): Promise<void> {
+    try {
+      const content = await fs.readFile(filePath, 'utf-8');
+      const lastPosition = this.filePositions.get(filePath) || 0;
+      
+      // Only process new content if not initial load
+      const newContent = isInitialLoad ? content : content.slice(lastPosition);
+      const lines = newContent.split('\n').filter(line => line.trim());
+
+      for (const line of lines) {
+        const logEntry = this.parseVSCodeLogLine(line, filePath);
+        if (logEntry) {
+          // Skip entries we've already processed
+          if (logEntry.timestamp <= this.lastProcessedTimestamp && !isInitialLoad) {
+            continue;
+          }
+
+          this.emit('log', logEntry);
+          
+          if (logEntry.timestamp > this.lastProcessedTimestamp) {
+            this.lastProcessedTimestamp = logEntry.timestamp;
+          }
+        }
+      }
+
+      // Update file position
+      this.filePositions.set(filePath, content.length);
+
+    } catch (error) {
+      console.warn('Failed to process log file:', filePath, error);
+    }
+  }
+
+  /**
+   * Parse VS Code log line
+   */
+  private parseVSCodeLogLine(line: string, filePath: string): LogEntry | null {
+    try {
+      // Try JSON parsing first
+      const jsonEntry: VSCodeLogEntry = JSON.parse(line);
+      return this.convertVSCodeToLogEntry(jsonEntry, filePath);
+    } catch {
+      // Parse VS Code native format: [timestamp] [level] [source] message
+      const patterns = [
+        /^\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d{3}Z)\]\s*\[(\w+)\]\s*\[([^\]]+)\]\s*(.+)$/,
+        /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d{3}Z)\s+(\w+)\s+([^:]+):\s*(.+)$/,
+        /^\[(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}.\d{3})\]\s*(\w+):\s*(.+)$/,
+      ];
+
+      for (const pattern of patterns) {
+        const match = line.match(pattern);
+        if (match) {
+          const [, timestamp, level, source, message] = match;
+          return this.convertPlainToLogEntry({
+            timestamp: new Date(timestamp),
+            level: this.convertLogLevel(level),
+            source: source,
+            message: message.trim(),
+            rawLine: line
+          }, filePath);
+        }
+      }
+
+      // Fallback for copilot-specific lines
+      if (line.toLowerCase().includes('copilot') || line.toLowerCase().includes('github')) {
+        return this.convertPlainToLogEntry({
+          timestamp: new Date(),
+          level: 'info',
+          source: 'copilot',
+          message: line.trim(),
+          rawLine: line
+        }, filePath);
+      }
+    }
+    
+    return null;
+  }
+
+  /**
+   * Convert VS Code JSON log entry to standard format
+   */
+  private convertVSCodeToLogEntry(vscodeEntry: VSCodeLogEntry, filePath: string): LogEntry {
+    return {
+      id: `vscode-${vscodeEntry.requestId || Date.now()}`,
+      timestamp: new Date(vscodeEntry.timestamp || Date.now()),
+      level: this.convertLogLevel(vscodeEntry.level || 'info'),
+      message: vscodeEntry.message || '',
+      agent: {
+        name: this.name,
+        version: this.version,
+        type: 'vscode-copilot'
+      },
+      source: {
+        file: filePath,
+        line: vscodeEntry.completionData?.line || null,
+        function: vscodeEntry.source || null
+      },
+      metadata: {
+        pid: vscodeEntry.pid,
+        extensionId: vscodeEntry.extensionId,
+        source: vscodeEntry.source,
+        command: vscodeEntry.command,
+        requestId: vscodeEntry.requestId,
+        completionData: vscodeEntry.completionData,
+        errorData: vscodeEntry.errorData,
+        authenticated: this.authenticatedExtensions.size > 0,
+        format: 'json',
+        mcp_native: false
+      },
+      raw: vscodeEntry
+    };
+  }
+
+  /**
+   * Convert plain text log entry to standard format
+   */
+  private convertPlainToLogEntry(plainEntry: {
+    timestamp: Date;
+    level: LogLevel;
+    source?: string;
+    message: string;
+    rawLine: string;
+  }, filePath: string): LogEntry {
+    return {
+      id: `vscode-plain-${Date.now()}`,
+      timestamp: plainEntry.timestamp,
+      level: plainEntry.level,
+      message: plainEntry.message,
+      agent: {
+        name: this.name,
+        version: this.version,
+        type: 'vscode-copilot'
+      },
+      source: {
+        file: filePath,
+        line: null,
+        function: plainEntry.source || null
+      },
+      metadata: {
+        source: plainEntry.source,
+        format: 'plain',
+        rawLine: plainEntry.rawLine,
+        authenticated: this.authenticatedExtensions.size > 0,
+        mcp_native: false
+      },
+      raw: plainEntry
+    };
+  }
+
+  /**
+   * Convert VS Code log level to standard format
+   */
+  private convertLogLevel(level: string): LogLevel {
+    const normalized = level.toLowerCase();
+    switch (normalized) {
+      case 'trace':
+      case 'debug': return 'debug';
+      case 'info':
+      case 'log': return 'info';
+      case 'warn':
+      case 'warning': return 'warn';
+      case 'error': return 'error';
+      case 'critical':
+      case 'fatal': return 'fatal';
+      default: return 'info';
+    }
+  }
+
+  /**
+   * Get adapter configuration
+   */
+  getConfig(): AgentConfig {
+    return { ...this.config };
+  }
+
+  /**
+   * Get current status
+   */
+  getStatus(): AgentStatus {
+    return this.status;
+  }
+
+  /**
+   * Get adapter capabilities
+   */
+  getCapabilities() {
+    return {
+      realTime: true,
+      historical: true,
+      filtering: true,
+      mcpNative: false,
+      authentication: true,
+      crossPlatform: true,
+      extensionAPI: true,
+      completionTracking: true
+    };
+  }
+
+  /**
+   * Update adapter configuration
+   */
+  async updateConfig(newConfig: Partial<AgentConfig>): Promise<void> {
+    this.config = { ...this.config, ...newConfig };
+    
+    // Restart monitoring if paths changed
+    if (newConfig.paths) {
+      await this.disconnect();
+      await this.initialize();
+    }
+
+    this.emit('config-updated', this.config);
+  }
+
+  /**
+   * Disconnect and cleanup
+   */
+  async disconnect(): Promise<void> {
+    this.status = 'disconnecting';
+    this.emit('status', this.status);
+
+    // Close all file watchers
+    for (const watcher of this.watchers) {
+      watcher.close();
+    }
+    this.watchers = [];
+    this.filePositions.clear();
+    this.authenticatedExtensions.clear();
+
+    this.status = 'disconnected';
+    this.emit('status', this.status);
+    this.emit('disconnected');
+  }
+
+  /**
+   * Check if VS Code Copilot is available on the system
+   */
+  static async isAvailable(): Promise<boolean> {
+    const adapter = new VSCodeAdapter({
+      enabled: true,
+      paths: {} as CrossPlatformPath,
+      pollingInterval: 1000,
+      privacyLevel: 'medium'
+    });
+
+    const logPath = adapter.getCurrentLogPath();
+    if (!logPath) return false;
+
+    try {
+      await fs.access(logPath);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  // Implement AgentAdapter interface methods
+  getDefaultConfig(): AgentConfig {
+    return VSCodeAdapter.getDefaultConfig();
+  }
+
+  validateConfig(config: AgentConfig): boolean {
+    return config.type === 'vscode-copilot' && Array.isArray(config.logPaths);
+  }
+
+  async discoverLogSources(): Promise<LogSource[]> {
+    const logPath = this.getCurrentLogPath();
+    const sources: LogSource[] = [];
+
+    try {
+      const currentSessionPath = await this.findCurrentSessionPath(logPath);
+      if (currentSessionPath) {
+        const sessionFiles = await fs.readdir(currentSessionPath);
+        const logFiles = sessionFiles.filter(file => this.isRelevantLogFile(file));
+
+        for (const file of logFiles) {
+          sources.push({
+            id: `vscode-${file}`,
+            name: `VSCode ${file}`,
+            type: 'file',
+            path: path.join(currentSessionPath, file),
+            enabled: true,
+            agentId: this.config.id
+          });
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to discover log sources:', error);
+    }
+
+    return sources;
+  }
+
+  async validateLogSource(source: LogSource): Promise<boolean> {
+    try {
+      await fs.access(source.path);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  createParser(): LogParser {
+    return {
+      name: 'vscode-mixed',
+      description: 'VSCode mixed format parser',
+      supportedFormats: ['json', 'plain'],
+      parse: (raw: string, source: LogSource) => {
+        return this.parseVSCodeLogLine(raw, source.path);
+      },
+      validate: (format: string) => {
+        return ['json', 'plain', 'mixed'].includes(format);
+      }
+    };
+  }
+
+  async processLogEntry(entry: LogEntry): Promise<LogEntry> {
+    // Add any VSCode-specific processing here
+    return entry;
+  }
+
+  async start(): Promise<void> {
+    await this.initialize();
+  }
+
+  async stop(): Promise<void> {
+    await this.disconnect();
+  }
+
+  async health(): Promise<{ status: "healthy" | "degraded" | "unhealthy"; details?: string }> {
+    const logPath = this.getCurrentLogPath();
+    
+    try {
+      await fs.access(logPath);
+      return { 
+        status: this.status === 'connected' ? 'healthy' : 'degraded',
+        details: `Status: ${this.status}, Extensions: ${this.authenticatedExtensions.size}, Watchers: ${this.watchers.length}`
+      };
+    } catch {
+      return { 
+        status: 'unhealthy', 
+        details: `Log path not accessible: ${logPath}` 
+      };
+    }
+  }
+
+  /**
+   * Get default configuration for VS Code adapter
+   */
+  static getDefaultConfig(): AgentConfig {
+    return {
+      id: 'vscode-default',
+      name: 'VSCode Copilot Agent',
+      type: 'vscode-copilot', 
+      enabled: true,
+      logPaths: [],
+      logFormat: 'mixed'
+    };
+  }
+} 

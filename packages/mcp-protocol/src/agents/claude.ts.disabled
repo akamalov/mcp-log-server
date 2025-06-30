@@ -1,0 +1,463 @@
+import * as fs from 'fs/promises';
+import { watch } from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+import { 
+  AgentConfig, 
+  LogSource, 
+  LogEntry, 
+  LogParser,
+  LogLevel,
+  AgentAdapter,
+  AgentStatus,
+  AgentType
+} from "@mcp-log-server/types/agent";
+import { BaseAgentAdapter } from "./base.js";
+import { EventEmitter } from 'events';
+
+export interface ClaudeLogEntry {
+  timestamp: string;
+  level: string;
+  message: string;
+  request_id: string;
+  model: string;
+  tokens_used: number;
+  conversation_id: string;
+}
+
+/**
+ * Log parser for Claude AI applications
+ */
+export class ClaudeLogParser implements LogParser {
+  readonly name = "claude-parser";
+  readonly description = "Parser for Claude AI application logs";
+  readonly supportedFormats = ["json", "structured"];
+
+  parse(raw: string, source: LogSource): LogEntry | null {
+    try {
+      // Try parsing as JSON first (Claude Desktop typically uses JSON logs)
+      const parsed = JSON.parse(raw) as ClaudeLogEntry;
+      
+      if (!parsed.timestamp || !parsed.message) {
+        return null;
+      }
+
+      return {
+        id: this.generateId(raw, source),
+        timestamp: new Date(parsed.timestamp).toISOString(),
+        level: this.parseLevel(parsed.level),
+        message: parsed.message,
+        source: source.id,
+        agentType: "claude-code",
+        context: parsed.context,
+        raw,
+      };
+    } catch {
+      // Fallback to plain text parsing
+      return this.parseTextLog(raw, source);
+    }
+  }
+
+  validate(format: string): boolean {
+    return this.supportedFormats.includes(format);
+  }
+
+  private parseTextLog(raw: string, source: LogSource): LogEntry | null {
+    // Basic text log parsing for Claude Code
+    const timestampMatch = raw.match(/(\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2}(?:\.\d{3})?(?:Z|[+-]\d{2}:\d{2})?)/);
+    const levelMatch = raw.match(/\[(trace|debug|info|warn|error|fatal)\]/i);
+    
+    if (!timestampMatch) {
+      return null;
+    }
+
+    const timestamp = new Date(timestampMatch[1]).toISOString();
+    const level = levelMatch ? this.parseLevel(levelMatch[1]) : "info";
+    const message = raw.replace(timestampMatch[0], "").replace(levelMatch?.[0] || "", "").trim();
+
+    return {
+      id: this.generateId(raw, source),
+      timestamp,
+      level,
+      message,
+      source: source.id,
+      agentType: "claude-code",
+      raw,
+    };
+  }
+
+  private parseLevel(level: string): LogLevel {
+    const normalized = level.toLowerCase();
+    switch (normalized) {
+      case "trace":
+      case "debug":
+        return "debug";
+      case "info":
+      case "information":
+        return "info";
+      case "warn":
+      case "warning":
+        return "warn";
+      case "error":
+      case "err":
+        return "error";
+      case "fatal":
+      case "critical":
+        return "fatal";
+      default:
+        return "info";
+    }
+  }
+
+  private generateId(raw: string, source: LogSource): string {
+    const content = `${source.id}-${raw}`;
+    let hash = 0;
+    for (let i = 0; i < content.length; i++) {
+      const char = content.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash;
+    }
+    return `claude-${Math.abs(hash).toString(36)}`;
+  }
+}
+
+/**
+ * Claude Code Agent Adapter
+ * 
+ * Handles log integration for Claude Code with native MCP support.
+ * Supports JSON Lines format and real-time file monitoring.
+ */
+export class ClaudeAdapter extends EventEmitter implements AgentAdapter {
+  public readonly agentType: AgentType = 'claude-code';
+  public readonly name = 'claude-code';
+  public readonly version = '1.0.0';
+  public readonly supportsMCP = true;
+  
+  private config: AgentConfig;
+  private status: AgentStatus = 'disconnected';
+  private watchers: ReturnType<typeof watch>[] = [];
+  private lastProcessedTimestamp: Date = new Date(0);
+
+  constructor(config: AgentConfig) {
+    super();
+    this.config = {
+      ...config,
+      paths: this.resolvePlatformPaths(),
+    };
+  }
+
+  /**
+   * Resolve Claude Code log paths for current platform
+   */
+  private resolvePlatformPaths(): CrossPlatformPath {
+    const platform = process.platform;
+    const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+
+    switch (platform) {
+      case 'darwin':
+        return {
+          linux: '',
+          darwin: path.join(homeDir, 'Library/Application Support/Claude/logs/'),
+          win32: ''
+        };
+      case 'win32':
+        const appData = process.env.APPDATA || '';
+        return {
+          linux: '',
+          darwin: '',
+          win32: path.join(appData, 'Claude', 'logs', '')
+        };
+      case 'linux':
+      default:
+        return {
+          linux: path.join(homeDir, '.config/claude/logs/'),
+          darwin: '',
+          win32: ''
+        };
+    }
+  }
+
+  /**
+   * Get current platform log path
+   */
+  private getCurrentLogPath(): string {
+    const platform = process.platform as keyof CrossPlatformPath;
+    return this.config.paths[platform] || '';
+  }
+
+  /**
+   * Initialize the Claude adapter
+   */
+  async initialize(): Promise<void> {
+    try {
+      this.status = 'connecting';
+      this.emit('status', this.status);
+
+      const logPath = this.getCurrentLogPath();
+      if (!logPath) {
+        throw new Error(`Unsupported platform: ${process.platform}`);
+      }
+
+      // Ensure log directory exists
+      await this.ensureLogDirectory(logPath);
+
+      // Start monitoring log files
+      await this.startFileMonitoring(logPath);
+
+      // Load existing log entries
+      await this.loadExistingLogs(logPath);
+
+      this.status = 'connected';
+      this.emit('status', this.status);
+      this.emit('initialized');
+
+    } catch (error) {
+      this.status = 'error';
+      this.emit('status', this.status);
+      this.emit('error', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Ensure log directory exists
+   */
+  private async ensureLogDirectory(logPath: string): Promise<void> {
+    try {
+      await fs.access(logPath);
+    } catch {
+      // Directory doesn't exist, Claude might not be installed or hasn't created logs yet
+      console.warn(`Claude log directory not found: ${logPath}`);
+    }
+  }
+
+  /**
+   * Start monitoring log files for changes
+   */
+  private async startFileMonitoring(logPath: string): Promise<void> {
+    try {
+      const files = await fs.readdir(logPath);
+      const logFiles = files.filter(file => file.endsWith('.log') || file.endsWith('.jsonl'));
+
+      for (const file of logFiles) {
+        const filePath = path.join(logPath, file);
+        const watcher = watch(filePath, (eventType: string) => {
+          if (eventType === 'change') {
+            this.processLogFile(filePath);
+          }
+        });
+        
+        this.watchers.push(watcher);
+      }
+
+      // Also watch the directory for new log files
+              const dirWatcher = watch(logPath, (eventType: string, filename: string | null) => {
+        if (eventType === 'rename' && filename && 
+            (filename.endsWith('.log') || filename.endsWith('.jsonl'))) {
+          const filePath = path.join(logPath, filename);
+          this.processLogFile(filePath);
+        }
+      });
+      
+      this.watchers.push(dirWatcher);
+
+    } catch (error) {
+      console.warn('Failed to start file monitoring:', error);
+    }
+  }
+
+  /**
+   * Load existing log entries
+   */
+  private async loadExistingLogs(logPath: string): Promise<void> {
+    try {
+      const files = await fs.readdir(logPath);
+      const logFiles = files.filter(file => file.endsWith('.log') || file.endsWith('.jsonl'));
+
+      for (const file of logFiles) {
+        const filePath = path.join(logPath, file);
+        await this.processLogFile(filePath, true);
+      }
+
+    } catch (error) {
+      console.warn('Failed to load existing logs:', error);
+    }
+  }
+
+  /**
+   * Process a log file and extract entries
+   */
+  private async processLogFile(filePath: string, isInitialLoad = false): Promise<void> {
+    try {
+      const content = await fs.readFile(filePath, 'utf-8');
+      const lines = content.split('\n').filter(line => line.trim());
+
+      for (const line of lines) {
+        try {
+          const claudeEntry: ClaudeLogEntry = JSON.parse(line);
+          const logEntry = this.convertToLogEntry(claudeEntry, filePath);
+
+          // Skip entries we've already processed
+          if (logEntry.timestamp <= this.lastProcessedTimestamp && !isInitialLoad) {
+            continue;
+          }
+
+          this.emit('log', logEntry);
+          
+          if (logEntry.timestamp > this.lastProcessedTimestamp) {
+            this.lastProcessedTimestamp = logEntry.timestamp;
+          }
+
+        } catch (parseError) {
+          // Skip malformed JSON lines
+          console.warn('Failed to parse Claude log entry:', parseError);
+        }
+      }
+
+    } catch (error) {
+      console.warn('Failed to process log file:', filePath, error);
+    }
+  }
+
+  /**
+   * Convert Claude log entry to standard log format
+   */
+  private convertToLogEntry(claudeEntry: ClaudeLogEntry, filePath: string): LogEntry {
+    return {
+      id: `claude-${claudeEntry.request_id || Date.now()}`,
+      timestamp: new Date(claudeEntry.timestamp),
+      level: this.convertLogLevel(claudeEntry.level),
+      message: claudeEntry.message,
+      agent: {
+        name: this.name,
+        version: this.version,
+        type: 'claude-code'
+      },
+      source: {
+        file: filePath,
+        line: null,
+        function: null
+      },
+      metadata: {
+        request_id: claudeEntry.request_id,
+        model: claudeEntry.model,
+        tokens_used: claudeEntry.tokens_used,
+        conversation_id: claudeEntry.conversation_id,
+        mcp_native: true
+      },
+      raw: claudeEntry
+    };
+  }
+
+  /**
+   * Convert Claude log level to standard format
+   */
+  private convertLogLevel(level: string): LogLevel {
+    const normalized = level.toLowerCase();
+    switch (normalized) {
+      case 'debug': return 'debug';
+      case 'info': return 'info';
+      case 'warn': 
+      case 'warning': return 'warn';
+      case 'error': return 'error';
+      case 'fatal': 
+      case 'critical': return 'fatal';
+      default: return 'info';
+    }
+  }
+
+  /**
+   * Get adapter configuration
+   */
+  getConfig(): AgentConfig {
+    return { ...this.config };
+  }
+
+  /**
+   * Get current status
+   */
+  getStatus(): AgentStatus {
+    return this.status;
+  }
+
+  /**
+   * Get adapter capabilities
+   */
+  getCapabilities() {
+    return {
+      realTime: true,
+      historical: true,
+      filtering: true,
+      mcpNative: true,
+      authentication: true,
+      crossPlatform: true
+    };
+  }
+
+  /**
+   * Update adapter configuration
+   */
+  async updateConfig(newConfig: Partial<AgentConfig>): Promise<void> {
+    this.config = { ...this.config, ...newConfig };
+    
+    // Restart monitoring if paths changed
+    if (newConfig.paths) {
+      await this.disconnect();
+      await this.initialize();
+    }
+
+    this.emit('config-updated', this.config);
+  }
+
+  /**
+   * Disconnect and cleanup
+   */
+  async disconnect(): Promise<void> {
+    this.status = 'disconnecting';
+    this.emit('status', this.status);
+
+    // Close all file watchers
+    for (const watcher of this.watchers) {
+      watcher.close();
+    }
+    this.watchers = [];
+
+    this.status = 'disconnected';
+    this.emit('status', this.status);
+    this.emit('disconnected');
+  }
+
+  /**
+   * Check if Claude is available on the system
+   */
+  static async isAvailable(): Promise<boolean> {
+    const adapter = new ClaudeAdapter({
+      enabled: true,
+      paths: {} as CrossPlatformPath,
+      pollingInterval: 1000,
+      privacyLevel: 'medium'
+    });
+
+    const logPath = adapter.getCurrentLogPath();
+    if (!logPath) return false;
+
+    try {
+      await fs.access(logPath);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Get default configuration for Claude adapter
+   */
+  static getDefaultConfig(): AgentConfig {
+    return {
+      enabled: true,
+      paths: {} as CrossPlatformPath, // Will be resolved at runtime
+      pollingInterval: 1000,
+      privacyLevel: 'medium'
+    };
+  }
+} 

@@ -1,0 +1,555 @@
+import * as fs from 'fs/promises';
+import { watch } from 'fs';
+import * as path from 'path';
+import { EventEmitter } from 'events';
+import { 
+  AgentAdapter, 
+  LogEntry, 
+  AgentConfig, 
+  LogLevel, 
+  AgentStatus,
+  AgentType,
+  LogSource,
+  LogParser
+} from '@mcp-log-server/types/agent';
+
+/**
+ * Cursor log entry interfaces
+ */
+interface CursorJSONLogEntry {
+  timestamp: string;
+  level: string;
+  message: string;
+  component?: string;
+  sessionId?: string;
+  cursor?: {
+    line: number;
+    column: number;
+    file: string;
+  };
+  codeContext?: {
+    before: string[];
+    after: string[];
+    selection: string;
+  };
+}
+
+interface CursorPlainLogEntry {
+  timestamp: Date;
+  level: LogLevel;
+  message: string;
+  rawLine: string;
+}
+
+/**
+ * Cursor AI Agent Adapter
+ * 
+ * Handles log integration for Cursor with mixed format support.
+ * Processes both JSON and plain text log entries with real-time cursor tracking.
+ */
+export class CursorAdapter extends EventEmitter implements AgentAdapter {
+  public readonly agentType: AgentType = 'cursor';
+  public readonly name = 'cursor';
+  public readonly version = '1.0.0';
+  public readonly supportsMCP = false; // Partial MCP compliance, requires conversion
+  
+  private config: AgentConfig;
+  private status: 'disconnected' | 'connecting' | 'connected' | 'error' = 'disconnected';
+  private watchers: ReturnType<typeof watch>[] = [];
+  private lastProcessedTimestamp: Date = new Date(0);
+  private filePositions: Map<string, number> = new Map();
+
+  constructor(config: AgentConfig) {
+    super();
+    this.config = {
+      ...config,
+      paths: this.resolvePlatformPaths(),
+    };
+  }
+
+  /**
+   * Resolve Cursor log paths for current platform
+   */
+  private resolvePlatformPaths(): Record<string, string> {
+    const platform = process.platform;
+    const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+
+    switch (platform) {
+      case 'darwin':
+        return {
+          linux: '',
+          darwin: path.join(homeDir, 'Library/Logs/Cursor/'),
+          win32: ''
+        };
+      case 'win32':
+        const appData = process.env.APPDATA || '';
+        return {
+          linux: '',
+          darwin: '',
+          win32: path.join(appData, 'Cursor', 'logs', '')
+        };
+      case 'linux':
+      default:
+        return {
+          linux: path.join(homeDir, '.config/Cursor/logs/'),
+          darwin: '',
+          win32: ''
+        };
+    }
+  }
+
+  /**
+   * Get current platform log path
+   */
+  private getCurrentLogPath(): string {
+    const platform = process.platform;
+    return this.config.paths?.[platform] || this.resolvePlatformPaths()[platform] || '';
+  }
+
+  /**
+   * Initialize the Cursor adapter
+   */
+  async initialize(): Promise<void> {
+    try {
+      this.status = 'connecting';
+      this.emit('status', this.status);
+
+      const logPath = this.getCurrentLogPath();
+      if (!logPath) {
+        throw new Error(`Unsupported platform: ${process.platform}`);
+      }
+
+      // Ensure log directory exists
+      await this.ensureLogDirectory(logPath);
+
+      // Start monitoring log files
+      await this.startFileMonitoring(logPath);
+
+      // Load existing log entries
+      await this.loadExistingLogs(logPath);
+
+      this.status = 'connected';
+      this.emit('status', this.status);
+      this.emit('initialized');
+
+    } catch (error) {
+      this.status = 'error';
+      this.emit('status', this.status);
+      this.emit('error', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Ensure log directory exists
+   */
+  private async ensureLogDirectory(logPath: string): Promise<void> {
+    try {
+      await fs.access(logPath);
+    } catch {
+      console.warn(`Cursor log directory not found: ${logPath}`);
+    }
+  }
+
+  /**
+   * Start monitoring log files for changes
+   */
+  private async startFileMonitoring(logPath: string): Promise<void> {
+    try {
+      const files = await fs.readdir(logPath);
+      const logFiles = files.filter(file => 
+        file.endsWith('.log') || 
+        file.endsWith('.txt') || 
+        file.endsWith('.json')
+      );
+
+      for (const file of logFiles) {
+        const filePath = path.join(logPath, file);
+        const watcher = watch(filePath, (eventType: string) => {
+          if (eventType === 'change') {
+            this.processLogFile(filePath);
+          }
+        });
+        
+        this.watchers.push(watcher);
+      }
+
+      // Watch directory for new files
+              const dirWatcher = watch(logPath, (eventType: string, filename: string | null) => {
+        if (eventType === 'rename' && filename && this.isLogFile(filename)) {
+          const filePath = path.join(logPath, filename);
+          this.processLogFile(filePath);
+        }
+      });
+      
+      this.watchers.push(dirWatcher);
+
+    } catch (error) {
+      console.warn('Failed to start file monitoring:', error);
+    }
+  }
+
+  /**
+   * Check if filename is a log file
+   */
+  private isLogFile(filename: string): boolean {
+    return filename.endsWith('.log') || 
+           filename.endsWith('.txt') || 
+           filename.endsWith('.json');
+  }
+
+  /**
+   * Load existing log entries
+   */
+  private async loadExistingLogs(logPath: string): Promise<void> {
+    try {
+      const files = await fs.readdir(logPath);
+      const logFiles = files.filter(file => this.isLogFile(file));
+
+      for (const file of logFiles) {
+        const filePath = path.join(logPath, file);
+        await this.processLogFile(filePath, true);
+      }
+
+    } catch (error) {
+      console.warn('Failed to load existing logs:', error);
+    }
+  }
+
+  /**
+   * Process a log file and extract entries
+   */
+  private async processLogFile(filePath: string, isInitialLoad = false): Promise<void> {
+    try {
+      const content = await fs.readFile(filePath, 'utf-8');
+      const lastPosition = this.filePositions.get(filePath) || 0;
+      
+      // Only process new content if not initial load
+      const newContent = isInitialLoad ? content : content.slice(lastPosition);
+      const lines = newContent.split('\n').filter(line => line.trim());
+
+      for (const line of lines) {
+        const logEntry = this.parseLogLine(line, filePath);
+        if (logEntry) {
+          // Skip entries we've already processed
+          if (logEntry.timestamp <= this.lastProcessedTimestamp && !isInitialLoad) {
+            continue;
+          }
+
+          this.emit('log', logEntry);
+          
+          if (logEntry.timestamp > this.lastProcessedTimestamp) {
+            this.lastProcessedTimestamp = logEntry.timestamp;
+          }
+        }
+      }
+
+      // Update file position
+      this.filePositions.set(filePath, content.length);
+
+    } catch (error) {
+      console.warn('Failed to process log file:', filePath, error);
+    }
+  }
+
+  /**
+   * Parse a log line (JSON or plain text)
+   */
+  private parseLogLine(line: string, filePath: string): LogEntry | null {
+    try {
+      // Try to parse as JSON first
+      const jsonEntry: CursorJSONLogEntry = JSON.parse(line);
+      return this.convertJSONToLogEntry(jsonEntry, filePath);
+    } catch {
+      // If JSON parsing fails, try plain text parsing
+      const plainEntry = this.parsePlainTextLine(line);
+      if (plainEntry) {
+        return this.convertPlainToLogEntry(plainEntry, filePath);
+      }
+    }
+    
+    return null;
+  }
+
+  /**
+   * Parse plain text log line
+   */
+  private parsePlainTextLine(line: string): CursorPlainLogEntry | null {
+    // Pattern: [timestamp] [level] message
+    const patterns = [
+      /^\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d{3}Z)\]\s*\[(\w+)\]\s*(.+)$/,
+      /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d{3}Z)\s+(\w+):\s*(.+)$/,
+      /^\[(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\]\s*(\w+):\s*(.+)$/,
+    ];
+
+    for (const pattern of patterns) {
+      const match = line.match(pattern);
+      if (match) {
+        const [, timestamp, level, message] = match;
+        return {
+          timestamp: new Date(timestamp),
+          level: this.convertLogLevel(level),
+          message: message.trim(),
+          rawLine: line
+        };
+      }
+    }
+
+    // Fallback: treat as info log with current timestamp
+    if (line.trim()) {
+      return {
+        timestamp: new Date(),
+        level: 'info',
+        message: line.trim(),
+        rawLine: line
+      };
+    }
+
+    return null;
+  }
+
+  /**
+   * Convert JSON log entry to standard format
+   */
+  private convertJSONToLogEntry(cursorEntry: CursorJSONLogEntry, filePath: string): LogEntry {
+    return {
+      id: `cursor-${cursorEntry.sessionId || Date.now()}`,
+      timestamp: new Date(cursorEntry.timestamp).toISOString(),
+      level: this.convertLogLevel(cursorEntry.level),
+      message: cursorEntry.message,
+      source: filePath,
+      agentType: 'cursor',
+      sessionId: cursorEntry.sessionId,
+      context: {
+        cursor: cursorEntry.cursor,
+        codeContext: cursorEntry.codeContext
+      },
+      metadata: {
+        component: cursorEntry.component,
+        format: 'json',
+        mcp_native: false
+      },
+      raw: JSON.stringify(cursorEntry)
+    };
+  }
+
+  /**
+   * Convert plain text log entry to standard format
+   */
+  private convertPlainToLogEntry(plainEntry: CursorPlainLogEntry, filePath: string): LogEntry {
+    return {
+      id: `cursor-plain-${Date.now()}`,
+      timestamp: plainEntry.timestamp.toISOString(),
+      level: plainEntry.level,
+      message: plainEntry.message,
+      source: filePath,
+      agentType: 'cursor',
+      metadata: {
+        format: 'plain',
+        rawLine: plainEntry.rawLine,
+        mcp_native: false
+      },
+      raw: plainEntry.rawLine
+    };
+  }
+
+  /**
+   * Convert Cursor log level to standard format
+   */
+  private convertLogLevel(level: string): LogLevel {
+    const normalized = level.toLowerCase();
+    switch (normalized) {
+      case 'debug':
+      case 'verbose': return 'debug';
+      case 'info':
+      case 'information': return 'info';
+      case 'warn':
+      case 'warning': return 'warn';
+      case 'error': return 'error';
+      case 'fatal':
+      case 'critical': return 'fatal';
+      default: return 'info';
+    }
+  }
+
+  /**
+   * Get adapter configuration
+   */
+  getConfig(): AgentConfig {
+    return { ...this.config };
+  }
+
+  /**
+   * Get current status
+   */
+  getStatus(): string {
+    return this.status;
+  }
+
+  /**
+   * Get adapter capabilities
+   */
+  getCapabilities() {
+    return {
+      realTime: true,
+      historical: true,
+      filtering: true,
+      mcpNative: false,
+      authentication: false,
+      crossPlatform: true,
+      mixedFormat: true,
+      cursorTracking: true
+    };
+  }
+
+  /**
+   * Update adapter configuration
+   */
+  async updateConfig(newConfig: Partial<AgentConfig>): Promise<void> {
+    this.config = { ...this.config, ...newConfig };
+    
+    // Restart monitoring if paths changed
+    if (newConfig.paths) {
+      await this.disconnect();
+      await this.initialize();
+    }
+
+    this.emit('config-updated', this.config);
+  }
+
+  /**
+   * Disconnect and cleanup
+   */
+  async disconnect(): Promise<void> {
+    this.status = 'disconnecting';
+    this.emit('status', this.status);
+
+    // Close all file watchers
+    for (const watcher of this.watchers) {
+      watcher.close();
+    }
+    this.watchers = [];
+    this.filePositions.clear();
+
+    this.status = 'disconnected';
+    this.emit('status', this.status);
+    this.emit('disconnected');
+  }
+
+  /**
+   * Check if Cursor is available on the system
+   */
+  static async isAvailable(): Promise<boolean> {
+    const adapter = new CursorAdapter(CursorAdapter.getDefaultConfig());
+    const logPath = adapter.getCurrentLogPath();
+    if (!logPath) return false;
+
+    try {
+      await fs.access(logPath);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Get default configuration for Cursor adapter
+   */
+  static getDefaultConfig(): AgentConfig {
+    return {
+      id: 'cursor-default',
+      name: 'Cursor Agent',
+      type: 'cursor',
+      enabled: true,
+      logPaths: [],
+      logFormat: 'mixed'
+    };
+  }
+
+  // Implement AgentAdapter interface methods
+  getDefaultConfig(): AgentConfig {
+    return CursorAdapter.getDefaultConfig();
+  }
+
+  validateConfig(config: AgentConfig): boolean {
+    return config.type === 'cursor' && Array.isArray(config.logPaths);
+  }
+
+  async discoverLogSources(): Promise<LogSource[]> {
+    const logPath = this.getCurrentLogPath();
+    const sources: LogSource[] = [];
+
+    try {
+      const files = await fs.readdir(logPath);
+      const logFiles = files.filter(file => this.isLogFile(file));
+
+      for (const file of logFiles) {
+        sources.push({
+          id: `cursor-${file}`,
+          name: `Cursor ${file}`,
+          type: 'file',
+          path: path.join(logPath, file),
+          enabled: true,
+          agentId: this.config.id
+        });
+      }
+    } catch (error) {
+      console.warn('Failed to discover log sources:', error);
+    }
+
+    return sources;
+  }
+
+  async validateLogSource(source: LogSource): Promise<boolean> {
+    try {
+      await fs.access(source.path);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  createParser(): LogParser {
+    return {
+      name: 'cursor-mixed',
+      description: 'Cursor mixed format parser',
+      supportedFormats: ['json', 'plain'],
+      parse: (raw: string, source: LogSource) => {
+        return this.parseLogLine(raw, source.path);
+      },
+      validate: (format: string) => {
+        return ['json', 'plain', 'mixed'].includes(format);
+      }
+    };
+  }
+
+  async processLogEntry(entry: LogEntry): Promise<LogEntry> {
+    // Add any Cursor-specific processing here
+    return entry;
+  }
+
+  async start(): Promise<void> {
+    await this.initialize();
+  }
+
+  async stop(): Promise<void> {
+    await this.disconnect();
+  }
+
+  async health(): Promise<{ status: "healthy" | "degraded" | "unhealthy"; details?: string }> {
+    const logPath = this.getCurrentLogPath();
+    
+    try {
+      await fs.access(logPath);
+      return { 
+        status: this.status === 'connected' ? 'healthy' : 'degraded',
+        details: `Status: ${this.status}, Watchers: ${this.watchers.length}`
+      };
+    } catch {
+      return { 
+        status: 'unhealthy', 
+        details: `Log path not accessible: ${logPath}` 
+      };
+    }
+  }
+} 
