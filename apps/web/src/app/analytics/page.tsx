@@ -6,6 +6,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer 
 } from 'recharts';
 import { useWebSocket } from '@/hooks/useWebSocket';
+import DataExport from '@/components/export/DataExport';
 
 // Color palette for charts
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#82CA9D'];
@@ -435,6 +436,9 @@ export default function AnalyticsPage() {
           </table>
         </div>
       </div>
+
+      {/* Data Export Section */}
+      <DataExport />
     </div>
   );
 }

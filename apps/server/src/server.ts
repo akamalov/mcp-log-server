@@ -153,8 +153,8 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
                   type: 'object',
                   properties: {
                     id: { type: 'string' },
+                    name: { type: 'string' },
                     available: { type: 'boolean' },
-                    config: { type: 'object' },
                   },
                 },
               },
@@ -163,7 +163,24 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
         },
       },
     }, async (request, reply) => {
-      return { agents: availableAgents };
+      try {
+        // Get unique source names from the logs
+        const logs = await logsService.getRecentLogs(1000); // Get a good sample of logs
+        const uniqueSources = [...new Set(logs.map(log => log.source))];
+        
+        // Create agent objects with the actual source names
+        const agents = uniqueSources.map(source => ({
+          id: source,
+          name: source,
+          available: true
+        }));
+        
+        return { agents };
+      } catch (error) {
+        logger.error('Failed to get agents', { error });
+        // Fallback to predefined agents if database query fails
+        return { agents: availableAgents };
+      }
     });
 
     // Get specific agent details
@@ -323,12 +340,33 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
           inputSchema: {
             type: 'object',
             properties: {
-              query: { type: 'string', description: 'Search query' },
-              source: { type: 'string', description: 'Filter by log source' },
-              level: { type: 'string', description: 'Filter by log level' },
-              timeRange: { type: 'string', description: 'Time range (e.g., "1h", "1d")' }
+              search: { type: 'string', description: 'Search query' },
+              sources: { 
+                type: 'array', 
+                items: { type: 'string' },
+                description: 'Filter by log sources' 
+              },
+              levels: { 
+                type: 'array', 
+                items: { type: 'string' },
+                description: 'Filter by log levels' 
+              },
+              from: { type: 'string', description: 'Start time (ISO string)' },
+              to: { type: 'string', description: 'End time (ISO string)' },
+              limit: { type: 'number', description: 'Maximum number of results' },
+              offset: { type: 'number', description: 'Offset for pagination' },
+              sortBy: { 
+                type: 'string', 
+                enum: ['timestamp', 'level', 'source'],
+                description: 'Sort by field' 
+              },
+              sortOrder: { 
+                type: 'string', 
+                enum: ['asc', 'desc'],
+                description: 'Sort order' 
+              }
             },
-            required: ['query']
+            required: []
           }
         },
         {
