@@ -1,4 +1,9 @@
-import { vi } from 'vitest';
+import { vi, beforeEach } from 'vitest';
+
+declare global {
+  // eslint-disable-next-line no-var
+  var testHelpers: any;
+}
 
 // Global test setup
 beforeEach(() => {
@@ -19,7 +24,7 @@ vi.mock('process', () => ({
 }));
 
 // Global test utilities
-global.testHelpers = {
+globalThis.testHelpers = {
   createMockMCPMessage: () => ({
     id: 'test-id',
     timestamp: new Date().toISOString(),

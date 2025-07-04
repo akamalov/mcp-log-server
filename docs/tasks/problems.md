@@ -142,6 +142,89 @@ interface Transport {
 
 ## Phase 2: Backend Infrastructure
 
+### **PROBLEM**: WebSocket Package Dependency Missing
+**Date**: 2024-01-XX  
+**Phase**: 2.2.2  
+**Description**: `@fastify/websocket` package not installed, causing import failures during WebSocket server implementation.
+
+**SOLUTION**:
+- Install the missing dependency: `pnpm add @fastify/websocket`
+- Update package.json to include the WebSocket plugin
+- Register WebSocket plugin in Fastify server configuration
+
+```bash
+# Install the required dependency
+pnpm add @fastify/websocket
+
+# Register in server
+await server.register(websocket);
+```
+
+---
+
+### **PROBLEM**: WebSocket Connection Object Structure Mismatch
+**Date**: 2024-01-XX  
+**Phase**: 2.2.2  
+**Description**: Used `connection.socket` but in Fastify WebSocket, `connection` IS the WebSocket instance, causing connection failures.
+
+**SOLUTION**:
+- Changed all references from `connection.socket` to `connection`
+- Updated WebSocket message handling to use connection directly
+- Fixed client connection management code
+
+```typescript
+// Before (incorrect)
+connection.socket.send(JSON.stringify(message));
+
+// After (correct)
+connection.send(JSON.stringify(message));
+```
+
+---
+
+### **PROBLEM**: WebSocket Endpoints Missing Message Handlers
+**Date**: 2024-01-XX  
+**Phase**: 2.2.2  
+**Description**: Analytics WebSocket endpoint lacked proper message handler, causing connections to close with error code 1006.
+
+**SOLUTION**:
+- Added message handlers to both `/ws/logs` and `/ws/analytics` endpoints
+- Implemented proper error handling and logging
+- Added connection state management
+
+```typescript
+// Added message handlers for both endpoints
+socket.on('message', (rawMessage) => {
+  try {
+    const message = JSON.parse(rawMessage.toString());
+    // Handle message based on type
+  } catch (error) {
+    console.error('Invalid message format:', error);
+  }
+});
+```
+
+---
+
+### **PROBLEM**: Multiple Server Instances Port Conflicts
+**Date**: 2024-01-XX  
+**Phase**: 2.2.2  
+**Description**: Multiple server instances caused EADDRINUSE errors when trying to bind to the same port.
+
+**SOLUTION**:
+- Properly kill existing processes before restarting
+- Add process cleanup in development scripts
+- Use different ports for development vs production
+
+```bash
+# Kill existing processes
+pkill -f "node.*server"
+# Or use lsof to find and kill specific port usage
+lsof -ti:3001 | xargs kill -9
+```
+
+---
+
 ### **PROBLEM**: ClickHouse Schema Design for Time-Series Data
 **Date**: TBD  
 **Phase**: 2.1.1  
@@ -199,6 +282,76 @@ class WebSocketManager {
 ---
 
 ## Phase 3: Frontend Development
+
+### **PROBLEM**: TypeScript Configuration Compilation Errors
+**Date**: 2024-01-XX  
+**Phase**: 3.1.1  
+**Description**: TypeScript compilation errors related to missing Promise and Date types, preventing successful builds.
+
+**SOLUTION**:
+- Added DOM and ES2015 libraries to tsconfig.json
+- Configured proper TypeScript project references
+- Used skipLibCheck to bypass library definition issues
+- Set up proper module resolution
+
+```json
+{
+  "compilerOptions": {
+    "lib": ["dom", "dom.iterable", "es6"],
+    "skipLibCheck": true,
+    "moduleResolution": "node"
+  }
+}
+```
+
+---
+
+### **PROBLEM**: Analytics Dashboard Infinite Re-render Loop
+**Date**: 2024-01-XX  
+**Phase**: 3.3.1  
+**Description**: "Maximum update depth exceeded" errors due to infinite re-renders in the analytics dashboard WebSocket integration.
+
+**SOLUTION**:
+- Used `useCallback` to memoize WebSocket event handlers
+- Removed state dependencies from connect callback
+- Used refs to track reconnect attempts instead of state
+- Implemented proper cleanup in useEffect
+
+```typescript
+const connectWebSocket = useCallback(() => {
+  // Memoized connection logic without state dependencies
+}, []); // Empty dependency array
+
+const handleMessage = useCallback((message: AnalyticsMessage) => {
+  // Memoized message handler
+}, []);
+```
+
+---
+
+### **PROBLEM**: WebSocket Connection State Management
+**Date**: 2024-01-XX  
+**Phase**: 3.3.1  
+**Description**: WebSocket connections not properly cleaning up, causing memory leaks and connection issues.
+
+**SOLUTION**:
+- Implemented proper connection cleanup in useEffect
+- Added connection state tracking with useRef
+- Used reconnection logic with exponential backoff
+- Added connection status indicators
+
+```typescript
+useEffect(() => {
+  return () => {
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+  };
+}, []);
+```
+
+---
 
 ### **PROBLEM**: Virtual Scrolling Performance with Large Log Datasets
 **Date**: TBD  

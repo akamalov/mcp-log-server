@@ -1,0 +1,33 @@
+{
+  "name": "@mcp-log-server/database",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.js",
+    "./postgres": "./dist/postgres/index.js",
+    "./clickhouse": "./dist/clickhouse/index.js",
+    "./redis": "./dist/redis/index.js",
+    "./elasticsearch": "./dist/elasticsearch/index.js"
+  },
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@mcp-log-server/types": "workspace:*",
+    "pg": "catalog:",
+    "@types/pg": "catalog:",
+    "@clickhouse/client": "catalog:",
+    "redis": "catalog:",
+    "@elastic/elasticsearch": "catalog:",
+    "kysely": "catalog:",
+    "kysely-codegen": "catalog:"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+} 

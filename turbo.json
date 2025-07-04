@@ -4,14 +4,16 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
+      "inputs": ["src/**/*.ts", "src/**/*.tsx", "tsconfig.json", "package.json"],
+      "outputs": ["dist/**", ".next/**", "build/**"]
     },
     "dev": {
       "cache": false,
       "persistent": true
     },
     "test": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["build"],
+      "inputs": ["src/**/*.ts", "src/**/*.tsx", "test/**/*", "vitest.config.ts", "package.json"],
       "outputs": ["coverage/**"]
     },
     "test:watch": {
@@ -26,7 +28,8 @@
       "dependsOn": ["build", "^build"]
     },
     "lint": {
-      "dependsOn": ["^build"]
+      "inputs": ["src/**/*.ts", "src/**/*.tsx", ".eslintrc.js", "package.json"],
+      "outputs": []
     },
     "lint:fix": {
       "dependsOn": ["^build"]
@@ -35,6 +38,10 @@
       "dependsOn": ["^build"]
     },
     "clean": {
+      "cache": false
+    },
+    "start": {
+      "dependsOn": ["build"],
       "cache": false
     }
   },

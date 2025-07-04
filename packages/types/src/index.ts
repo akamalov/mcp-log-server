@@ -11,8 +11,13 @@ export {
 
 export {
   LogEntrySchema,
+  LogMetadataSchema,
   AgentConfigSchema,
   LogSourceSchema,
   LogQuerySchema,
   AgentStatusSchema,
-} from "./agent.js"; 
+} from "./agent.js";
+
+// Utility exports
+export * as MCPSchemas from './mcp.js';
+export * as AgentSchemas from './agent.js'; 

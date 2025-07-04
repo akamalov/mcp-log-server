@@ -10,6 +10,9 @@ export const LogLevelSchema = z.enum([
   "fatal"
 ]);
 
+// Log Metadata Schema
+export const LogMetadataSchema = z.record(z.unknown());
+
 export const LogEntrySchema = z.object({
   id: z.string(),
   timestamp: z.string().datetime(),
@@ -19,11 +22,12 @@ export const LogEntrySchema = z.object({
   agentType: z.string(), // claude, cursor, vscode-copilot, etc.
   sessionId: z.string().optional(),
   context: z.record(z.unknown()).optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: LogMetadataSchema.optional(),
   raw: z.string().optional(), // original log line
 });
 
 export type LogLevel = z.infer<typeof LogLevelSchema>;
+export type LogMetadata = z.infer<typeof LogMetadataSchema>;
 export type LogEntry = z.infer<typeof LogEntrySchema>;
 
 // AI Agent Types
