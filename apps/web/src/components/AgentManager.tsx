@@ -443,7 +443,7 @@ export default function AgentManager() {
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 placeholder-gray-500"
                   placeholder="My Custom Agent"
                   required
                 />
@@ -457,7 +457,7 @@ export default function AgentManager() {
                 <select
                   value={formData.type}
                   onChange={(e) => setFormData(prev => ({ ...prev, type: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
                 >
                   {AGENT_TYPES.map(type => (
                     <option key={type.value} value={type.value}>
@@ -475,7 +475,7 @@ export default function AgentManager() {
                 <select
                   value={formData.logFormat}
                   onChange={(e) => setFormData(prev => ({ ...prev, logFormat: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
                 >
                   {LOG_FORMATS.map(format => (
                     <option key={format.value} value={format.value}>
@@ -497,7 +497,7 @@ export default function AgentManager() {
                         type="text"
                         value={path}
                         onChange={(e) => updateLogPath(index, e.target.value)}
-                        className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 placeholder-gray-500"
                         placeholder="/path/to/log/file.log or /path/to/log/directory"
                       />
                       <button
@@ -608,7 +608,7 @@ export default function AgentManager() {
                 <select
                   value={discoveredAgentForm.logFormat}
                   onChange={(e) => setDiscoveredAgentForm(prev => ({ ...prev, logFormat: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
                 >
                   {LOG_FORMATS.map(format => (
                     <option key={format.value} value={format.value}>
@@ -630,7 +630,7 @@ export default function AgentManager() {
                         type="text"
                         value={path}
                         onChange={(e) => updateDiscoveredLogPath(index, e.target.value)}
-                        className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 placeholder-gray-500"
                         placeholder="/path/to/log/file.log or /path/to/log/directory"
                       />
                       <button
