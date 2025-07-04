@@ -70,12 +70,7 @@ export default function AgentManager() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [showDetails, setShowDetails] = useState<string | null>(null);
-
-  // Load agents on component mount
-  useEffect(() => {
-    loadAgents();
-    loadDiscoveredAgents();
-  }, []);
+  const [mounted, setMounted] = useState(false);
 
   const loadAgents = async () => {
     try {
@@ -239,6 +234,27 @@ export default function AgentManager() {
     setShowForm(false);
     setError(null);
   };
+
+  // Only load agents after component is mounted on client
+  useEffect(() => {
+    setMounted(true);
+    if (typeof window !== 'undefined') {
+      loadAgents();
+      loadDiscoveredAgents();
+    }
+  }, []);
+
+  // Don't render anything until mounted on client
+  if (!mounted) {
+    return (
+      <div className="p-6 max-w-6xl mx-auto">
+        <div className="animate-pulse">
+          <div className="h-8 bg-gray-200 rounded w-1/4 mb-6"></div>
+          <div className="h-64 bg-gray-200 rounded"></div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
