@@ -71,6 +71,18 @@ export default function AgentManager() {
   const [success, setSuccess] = useState<string | null>(null);
   const [showDetails, setShowDetails] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
+  const [editingDiscoveredAgent, setEditingDiscoveredAgent] = useState<any | null>(null);
+  const [discoveredAgentForm, setDiscoveredAgentForm] = useState<{
+    logPaths: string[];
+    logFormat: string;
+    enabled: boolean;
+    filters: string[];
+  }>({
+    logPaths: [],
+    logFormat: 'text',
+    enabled: true,
+    filters: ['info', 'warn', 'error']
+  });
 
   const loadAgents = async () => {
     try {
@@ -232,6 +244,114 @@ export default function AgentManager() {
     setFormData(DEFAULT_FORM_DATA);
     setEditingAgent(null);
     setShowForm(false);
+    setError(null);
+  };
+
+  const handleEditDiscoveredAgent = (agent: any) => {
+    setEditingDiscoveredAgent(agent);
+    setDiscoveredAgentForm({
+      logPaths: agent.logPaths && agent.logPaths.length > 0 ? [...agent.logPaths] : [''],
+      logFormat: agent.logFormat || 'text',
+      enabled: true,
+      filters: ['info', 'warn', 'error']
+    });
+  };
+
+  const handleSaveDiscoveredAgent = async () => {
+    if (!editingDiscoveredAgent) return;
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      // Convert discovered agent to custom agent with updated paths
+      const customAgentData = {
+        name: editingDiscoveredAgent.name,
+        type: editingDiscoveredAgent.type || 'custom',
+        logPaths: discoveredAgentForm.logPaths.filter(path => path.trim()),
+        logFormat: discoveredAgentForm.logFormat,
+        enabled: discoveredAgentForm.enabled,
+        filters: discoveredAgentForm.filters,
+        metadata: {
+          ...editingDiscoveredAgent.metadata,
+          convertedFrom: 'discovered',
+          originalDiscoveredAt: editingDiscoveredAgent.metadata?.lastDiscovered,
+          createdBy: 'user'
+        }
+      };
+
+      const response = await fetch('/api/agents/custom', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(customAgentData)
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to save agent');
+      }
+
+      const result = await response.json();
+      setSuccess('Discovered agent converted to custom agent successfully');
+      
+      if (result.invalidPaths && result.invalidPaths.length > 0) {
+        setError(`Warning: Some paths were invalid: ${result.invalidPaths.join(', ')}`);
+      }
+
+      // Reset form and reload agents
+      setEditingDiscoveredAgent(null);
+      setDiscoveredAgentForm({
+        logPaths: [],
+        logFormat: 'text',
+        enabled: true,
+        filters: ['info', 'warn', 'error']
+      });
+      loadAgents();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save agent');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const addDiscoveredLogPath = () => {
+    setDiscoveredAgentForm(prev => ({ 
+      ...prev, 
+      logPaths: [...prev.logPaths, ''] 
+    }));
+  };
+
+  const removeDiscoveredLogPath = (index: number) => {
+    setDiscoveredAgentForm(prev => ({ 
+      ...prev, 
+      logPaths: prev.logPaths.filter((_, i) => i !== index) 
+    }));
+  };
+
+  const updateDiscoveredLogPath = (index: number, value: string) => {
+    setDiscoveredAgentForm(prev => ({ 
+      ...prev, 
+      logPaths: prev.logPaths.map((path, i) => i === index ? value : path)
+    }));
+  };
+
+  const toggleDiscoveredFilter = (filter: string) => {
+    setDiscoveredAgentForm(prev => ({
+      ...prev,
+      filters: prev.filters.includes(filter)
+        ? prev.filters.filter(f => f !== filter)
+        : [...prev.filters, filter]
+    }));
+  };
+
+  const resetDiscoveredForm = () => {
+    setEditingDiscoveredAgent(null);
+    setDiscoveredAgentForm({
+      logPaths: [],
+      logFormat: 'text',
+      enabled: true,
+      filters: ['info', 'warn', 'error']
+    });
     setError(null);
   };
 
@@ -459,6 +579,163 @@ export default function AgentManager() {
         </div>
       )}
 
+      {/* Discovered Agent Edit Modal */}
+      {editingDiscoveredAgent && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold">
+                Edit & Convert Discovered Agent: {editingDiscoveredAgent.name}
+              </h2>
+              <button onClick={resetDiscoveredForm} className="text-gray-500 hover:text-gray-700">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <p className="text-sm text-blue-800">
+                <strong>Note:</strong> Editing this discovered agent will convert it to a custom agent that you can fully manage.
+                The original auto-discovered agent will remain unchanged.
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              {/* Log Format */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Log Format
+                </label>
+                <select
+                  value={discoveredAgentForm.logFormat}
+                  onChange={(e) => setDiscoveredAgentForm(prev => ({ ...prev, logFormat: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {LOG_FORMATS.map(format => (
+                    <option key={format.value} value={format.value}>
+                      {format.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Log Paths */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Log Paths *
+                </label>
+                <div className="space-y-2">
+                  {discoveredAgentForm.logPaths.map((path, index) => (
+                    <div key={index} className="flex gap-2">
+                      <input
+                        type="text"
+                        value={path}
+                        onChange={(e) => updateDiscoveredLogPath(index, e.target.value)}
+                        className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="/path/to/log/file.log or /path/to/log/directory"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeDiscoveredLogPath(index)}
+                        className="px-3 py-2 text-red-600 hover:text-red-800"
+                        disabled={discoveredAgentForm.logPaths.length === 1}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={addDiscoveredLogPath}
+                    className="flex items-center gap-2 px-3 py-2 text-blue-600 hover:text-blue-800"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Add Log Path
+                  </button>
+                </div>
+              </div>
+
+              {/* Log Level Filters */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Log Level Filters
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {LOG_LEVELS.map(level => (
+                    <label key={level} className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={discoveredAgentForm.filters.includes(level)}
+                        onChange={() => toggleDiscoveredFilter(level)}
+                        className="rounded text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="text-sm capitalize">{level}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Enabled Toggle */}
+              <div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={discoveredAgentForm.enabled}
+                    onChange={(e) => setDiscoveredAgentForm(prev => ({ ...prev, enabled: e.target.checked }))}
+                    className="rounded text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm font-medium text-gray-700">
+                    Enable Agent
+                  </span>
+                </label>
+              </div>
+
+              {/* Original Discovery Info */}
+              <div className="p-3 bg-gray-50 rounded-lg">
+                <h4 className="font-medium text-gray-900 mb-2">Original Discovery Info:</h4>
+                <div className="grid grid-cols-2 gap-2 text-sm text-gray-600">
+                  <div><strong>Source:</strong> {editingDiscoveredAgent.metadata?.source}</div>
+                  <div><strong>Confidence:</strong> {((editingDiscoveredAgent.metadata?.confidence || 0) * 100).toFixed(1)}%</div>
+                  <div><strong>Type:</strong> {editingDiscoveredAgent.type}</div>
+                  <div><strong>Original Paths:</strong> {editingDiscoveredAgent.logPaths?.length || 0}</div>
+                </div>
+                {editingDiscoveredAgent.logPaths && editingDiscoveredAgent.logPaths.length > 0 && (
+                  <div className="mt-2">
+                    <strong className="text-gray-700">Original discovered paths:</strong>
+                    <ul className="list-disc list-inside text-xs text-gray-600 mt-1">
+                      {editingDiscoveredAgent.logPaths.slice(0, 3).map((path, index) => (
+                        <li key={index} className="font-mono truncate">{path}</li>
+                      ))}
+                      {editingDiscoveredAgent.logPaths.length > 3 && (
+                        <li className="text-gray-500">... and {editingDiscoveredAgent.logPaths.length - 3} more</li>
+                      )}
+                    </ul>
+                  </div>
+                )}
+              </div>
+
+              {/* Form Actions */}
+              <div className="flex gap-3 pt-4">
+                <button
+                  onClick={handleSaveDiscoveredAgent}
+                  disabled={loading || discoveredAgentForm.logPaths.every(path => !path.trim())}
+                  className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+                >
+                  <Save className="w-4 h-4" />
+                  Convert to Custom Agent
+                </button>
+                <button
+                  type="button"
+                  onClick={resetDiscoveredForm}
+                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Agents List */}
       <div className="space-y-6">
         {/* Custom Agents */}
@@ -565,6 +842,13 @@ export default function AgentManager() {
                         title="View discovered paths"
                       >
                         {showDetails === agent.id ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                      <button
+                        onClick={() => handleEditDiscoveredAgent(agent)}
+                        className="p-2 text-green-600 hover:text-green-800"
+                        title="Edit and convert to custom agent"
+                      >
+                        <Edit className="w-4 h-4" />
                       </button>
                       <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full">
                         Auto-discovered
