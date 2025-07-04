@@ -2,6 +2,7 @@ import { promises as fs } from 'fs';
 import { join, resolve } from 'path';
 import { homedir } from 'os';
 import type { AgentConfig } from '@mcp-log-server/types';
+// import type { DatabaseService } from './database.service.js';
 
 /**
  * Check if we're running in WSL environment
@@ -95,34 +96,54 @@ async function generateAgentPaths(basePaths: { [platform: string]: string[] }): 
       console.log(`🔍 Checking Windows usernames: ${possibleUsers.join(', ')}`);
       
       for (const user of possibleUsers) {
-        // Claude paths in Windows
+        // Claude Desktop app paths in Windows (primary - matches %APPDATA%\Claude\logs)
         allPaths.push(
           join(mount, 'Users', user, 'AppData', 'Roaming', 'Claude', 'logs'),
           join(mount, 'Users', user, 'AppData', 'Local', 'Claude', 'logs'),
           join(mount, 'Users', user, '.claude', 'logs')
         );
         
+        // VS Code paths in Windows (more comprehensive)
+        allPaths.push(
+          join(mount, 'Users', user, 'AppData', 'Roaming', 'Code', 'logs'),
+          join(mount, 'Users', user, 'AppData', 'Local', 'Code', 'logs'),
+          join(mount, 'Users', user, '.vscode', 'logs'),
+          join(mount, 'Users', user, 'AppData', 'Roaming', 'Code', 'User', 'workspaceStorage'),
+          join(mount, 'Users', user, 'AppData', 'Local', 'Programs', 'Microsoft VS Code', 'logs')
+        );
+        
         // Cursor paths in Windows
         allPaths.push(
           join(mount, 'Users', user, 'AppData', 'Roaming', 'Cursor', 'logs'),
           join(mount, 'Users', user, 'AppData', 'Local', 'Cursor', 'logs'),
-          join(mount, 'Users', user, '.cursor', 'logs')
+          join(mount, 'Users', user, '.cursor', 'logs'),
+          join(mount, 'Users', user, 'AppData', 'Roaming', 'Cursor', 'User', 'workspaceStorage')
         );
         
-        // VS Code paths in Windows
+        // Claude CLI paths in Windows
         allPaths.push(
-          join(mount, 'Users', user, 'AppData', 'Roaming', 'Code', 'logs'),
-          join(mount, 'Users', user, 'AppData', 'Local', 'Code', 'logs'),
-          join(mount, 'Users', user, '.vscode', 'logs')
+          join(mount, 'Users', user, '.cache', 'claude-cli-nodejs'),
+          join(mount, 'Users', user, 'AppData', 'Local', 'claude-cli-nodejs'),
+          join(mount, 'Users', user, 'AppData', 'Roaming', 'claude-cli-nodejs')
+        );
+        
+        // Gemini CLI paths in Windows
+        allPaths.push(
+          join(mount, 'Users', user, 'AppData', 'Local', 'Gemini CLI', 'projects'),
+          join(mount, 'Users', user, 'AppData', 'Local', 'Gemini CLI', 'logs'),
+          join(mount, 'Users', user, 'AppData', 'Roaming', 'Gemini CLI', 'projects'),
+          join(mount, 'Users', user, 'AppData', 'Roaming', 'Gemini CLI', 'logs'),
+          join(mount, 'Users', user, '.gemini-cli', 'projects'),
+          join(mount, 'Users', user, '.gemini-cli', 'logs')
         );
         
         // Additional Windows-specific locations
         allPaths.push(
-          join(mount, 'Users', user, 'AppData', 'Roaming', 'Code', 'User', 'workspaceStorage'),
-          join(mount, 'Users', user, 'AppData', 'Roaming', 'Cursor', 'User', 'workspaceStorage'),
           join(mount, 'ProgramData', 'Claude', 'logs'),
           join(mount, 'ProgramData', 'Cursor', 'logs'),
-          join(mount, 'ProgramData', 'Microsoft VS Code', 'logs')
+          join(mount, 'ProgramData', 'Microsoft VS Code', 'logs'),
+          join(mount, 'Program Files', 'Microsoft VS Code', 'logs'),
+          join(mount, 'Program Files (x86)', 'Microsoft VS Code', 'logs')
         );
       }
     }
@@ -163,6 +184,12 @@ async function createMockAgents(): Promise<AgentConfig[]> {
         name: 'Mock VS Code (WSL Test)',
         type: 'vscode-copilot',
         logFile: 'vscode-mock.log'
+      },
+      {
+        id: 'mock-gemini',
+        name: 'Mock Gemini CLI (WSL Test)',
+        type: 'gemini-code-assist',
+        logFile: 'gemini-mock.log'
       }
     ];
     
@@ -234,9 +261,30 @@ const defaultConfig: AgentDiscoveryConfig = {
 /**
  * Discover available AI agents on the system
  */
-export async function discoverAgents(config: Partial<AgentDiscoveryConfig> = {}): Promise<AgentConfig[]> {
+export async function discoverAgents(
+  config: Partial<AgentDiscoveryConfig> = {},
+  databaseService?: any
+): Promise<AgentConfig[]> {
   const finalConfig = { ...defaultConfig, ...config };
   const agents: AgentConfig[] = [];
+
+  // Load custom agents from database if available
+  if (databaseService) {
+    try {
+      console.log('📂 Loading custom agents from database...');
+      const customLogSources = await databaseService.getCustomAgents();
+      const customAgents = customLogSources.map(logSource => 
+        databaseService.logSourceToAgentConfig(logSource)
+      );
+      
+      if (customAgents.length > 0) {
+        console.log(`✅ Loaded ${customAgents.length} custom agents from database`);
+        agents.push(...customAgents);
+      }
+    } catch (error) {
+      console.warn('⚠️ Failed to load custom agents from database:', error);
+    }
+  }
   
   // Try to detect real agents if enabled
   if (finalConfig.enableRealAgents) {
@@ -279,6 +327,17 @@ export async function discoverAgents(config: Partial<AgentDiscoveryConfig> = {})
       console.warn('❌ VS Code detection failed:', error);
     }
 
+    try {
+      const geminiAgent = await detectGeminiAgent();
+      if (geminiAgent) {
+        console.log('✅ Found Gemini CLI agent at:', geminiAgent.logPaths);
+        agents.push(geminiAgent);
+        realAgentsFound++;
+      }
+    } catch (error) {
+      console.warn('❌ Gemini CLI detection failed:', error);
+    }
+
     console.log(`🎯 Real agent detection complete: Found ${realAgentsFound} real agents`);
   }
 
@@ -293,12 +352,14 @@ export async function discoverAgents(config: Partial<AgentDiscoveryConfig> = {})
   }
 
   // Log final summary
-  const realCount = agents.filter(a => !a.metadata?.isMock).length;
+  const realCount = agents.filter(a => !a.metadata?.isMock && !a.metadata?.isCustom).length;
   const mockCount = agents.filter(a => a.metadata?.isMock).length;
+  const customCount = agents.filter(a => a.metadata?.isCustom).length;
   
   console.log(`📊 Agent discovery summary:`);
   console.log(`   Real agents: ${realCount}`);
   console.log(`   Mock agents: ${mockCount}`);
+  console.log(`   Custom agents: ${customCount}`);
   console.log(`   Total agents: ${agents.length}`);
   console.log(`   Mixed mode: ${finalConfig.mixedMode ? 'enabled' : 'disabled'}`);
 
@@ -310,48 +371,138 @@ export async function discoverAgents(config: Partial<AgentDiscoveryConfig> = {})
  */
 async function detectClaudeAgent(): Promise<AgentConfig | null> {
   try {
+    const results: AgentConfig[] = [];
+    
+    // Define comprehensive paths for all platforms based on official Claude documentation
     const basePaths = {
       linux: [
+        // Claude CLI/MCP logs (primary for Linux/WSL)
+        join(homedir(), '.cache', 'claude-cli-nodejs'),
+        // VS Code extension logs (secondary)
+        join(homedir(), '.vscode-server', 'data', 'logs'),
+        join(homedir(), '.vscode', 'logs'),
+        // Alternative locations
         join(homedir(), '.claude', 'logs'),
         join(homedir(), '.config', 'claude', 'logs'),
-        // Add VS Code extension paths for Claude Code
-        join(homedir(), '.vscode-server', 'data', 'logs'),
+        '/var/log/claude'
       ],
       macos: [
-        join(homedir(), 'Library', 'Application Support', 'Claude', 'logs'),
+        // Claude Desktop app logs (primary for Mac)
         join(homedir(), 'Library', 'Logs', 'Claude'),
-        // Add VS Code extension paths for macOS
+        // Alternative Claude app locations
+        join(homedir(), 'Library', 'Application Support', 'Claude', 'logs'),
+        // Claude CLI/MCP logs
+        join(homedir(), '.cache', 'claude-cli-nodejs'),
+        // VS Code extension logs
         join(homedir(), 'Library', 'Application Support', 'Code', 'logs'),
+        join(homedir(), 'Library', 'Logs', 'Code'),
+        // Alternative locations
+        join(homedir(), '.claude', 'logs')
       ],
       windows: [
+        // Claude Desktop app logs (primary for Windows)
         join(homedir(), 'AppData', 'Roaming', 'Claude', 'logs'),
+        // Alternative Claude app locations
         join(homedir(), 'AppData', 'Local', 'Claude', 'logs'),
-        // Add VS Code extension paths for Windows
+        // Claude CLI/MCP logs
+        join(homedir(), '.cache', 'claude-cli-nodejs'),
+        // VS Code extension logs
         join(homedir(), 'AppData', 'Roaming', 'Code', 'logs'),
+        join(homedir(), 'AppData', 'Local', 'Code', 'logs'),
+        // Alternative locations
+        join(homedir(), '.claude', 'logs')
       ]
     };
     
     const possiblePaths = await generateAgentPaths(basePaths);
     console.log(`🔍 Checking ${possiblePaths.length} potential Claude paths...`);
     
-    // First, try to find VS Code Claude extension logs (more likely to exist)
-    const vscodeLogDirs = possiblePaths.filter(path => path.includes('.vscode-server') || path.includes('Code'));
+    // 1. Check for Claude Desktop app logs (highest priority - official Claude app)
+    const claudeDesktopPaths = possiblePaths.filter(path => 
+      (path.includes('/Claude/logs') || path.includes('\\Claude\\logs')) && 
+      !path.includes('Code') && !path.includes('claude-cli-nodejs')
+    );
+    
+    for (const logPath of claudeDesktopPaths) {
+      try {
+        const stat = await fs.stat(logPath);
+        if (stat.isDirectory()) {
+          console.log(`✅ Found Claude Desktop logs at: ${logPath}`);
+          results.push({
+            id: 'claude-desktop',
+            name: 'Claude Desktop',
+            type: 'claude-desktop',
+            enabled: true,
+            logPaths: [logPath],
+            logFormat: 'structured',
+            filters: ['debug', 'info', 'warn', 'error'],
+            metadata: {
+              version: '1.0.0',
+              lastDiscovered: new Date().toISOString(),
+              detectedPath: logPath,
+              isWSL: await isWSL()
+            }
+          });
+        }
+      } catch {
+        continue;
+      }
+    }
+    
+    // 2. Check for Claude CLI MCP logs (second priority - MCP servers)
+    const claudeCliPaths = possiblePaths.filter(path => path.includes('claude-cli-nodejs'));
+    
+    for (const claudeCliPath of claudeCliPaths) {
+      try {
+        const stat = await fs.stat(claudeCliPath);
+        if (stat.isDirectory()) {
+          console.log(`📁 Found Claude CLI cache at: ${claudeCliPath}`);
+          
+          const mcpLogPaths = await findClaudeMCPLogs(claudeCliPath);
+          if (mcpLogPaths.length > 0) {
+            console.log(`✅ Found ${mcpLogPaths.length} Claude MCP log directories`);
+            results.push({
+              id: 'claude-mcp-cli',
+              name: `Claude MCP (${mcpLogPaths.length} servers)`,
+              type: 'claude-mcp',
+              enabled: true,
+              logPaths: mcpLogPaths,
+              logFormat: 'claude-mcp-json',
+              filters: ['info', 'warn', 'error'],
+              metadata: {
+                version: '1.0.0',
+                lastDiscovered: new Date().toISOString(),
+                detectedPath: claudeCliPath,
+                mcpLogCount: mcpLogPaths.length,
+                isWSL: await isWSL()
+              }
+            });
+          }
+        }
+      } catch (error) {
+        console.log(`⚠️  Could not access Claude CLI cache at ${claudeCliPath}: ${error.message}`);
+      }
+    }
+    
+    // 3. Check for VS Code Claude extension logs (third priority - extension logs)
+    const vscodeLogDirs = possiblePaths.filter(path => 
+      path.includes('.vscode-server') || path.includes('.vscode') || path.includes('Code')
+    );
     
     for (const logDir of vscodeLogDirs) {
       try {
         const stat = await fs.stat(logDir);
         if (stat.isDirectory()) {
-          // Look for Claude Code extension logs in VS Code log structure
           const claudeLogPath = await findClaudeExtensionLogs(logDir);
           if (claudeLogPath) {
             console.log(`✅ Found Claude Code extension logs at: ${claudeLogPath}`);
-            return {
-              id: 'claude-code',
+            results.push({
+              id: 'claude-code-extension',
               name: 'Claude Code (VS Code Extension)',
               type: 'claude-code',
               enabled: true,
               logPaths: [claudeLogPath],
-              logFormat: 'native-mcp',
+              logFormat: 'vscode-extension',
               filters: ['debug', 'info', 'warn', 'error'],
               metadata: {
                 version: '1.0.0',
@@ -360,7 +511,7 @@ async function detectClaudeAgent(): Promise<AgentConfig | null> {
                 isVSCodeExtension: true,
                 isWSL: await isWSL()
               }
-            };
+            });
           }
         }
       } catch {
@@ -368,31 +519,11 @@ async function detectClaudeAgent(): Promise<AgentConfig | null> {
       }
     }
     
-    // Fallback to checking standard Claude paths
-    for (const logPath of possiblePaths) {
-      try {
-        const stat = await fs.stat(logPath);
-        if (stat.isDirectory()) {
-          console.log(`✅ Found Claude logs at: ${logPath}`);
-          return {
-            id: 'claude-code',
-            name: 'Claude Code',
-            type: 'claude-code',
-            enabled: true,
-            logPaths: [logPath],
-            logFormat: 'native-mcp',
-            filters: ['debug', 'info', 'warn', 'error'],
-            metadata: {
-              version: '1.0.0',
-              lastDiscovered: new Date().toISOString(),
-              detectedPath: logPath,
-              isWSL: await isWSL()
-            }
-          };
-        }
-      } catch {
-        continue;
-      }
+    // Return the first (highest priority) result
+    if (results.length > 0) {
+      const chosen = results[0];
+      console.log(`🎯 Selected Claude agent: ${chosen.name} (${chosen.logPaths.length} log paths)`);
+      return chosen;
     }
     
     console.log('⚠️  No Claude installation found');
@@ -401,6 +532,57 @@ async function detectClaudeAgent(): Promise<AgentConfig | null> {
   }
   
   return null;
+}
+
+/**
+ * Find Claude MCP logs in Claude CLI cache directory
+ */
+async function findClaudeMCPLogs(claudeCliPath: string): Promise<string[]> {
+  const mcpLogPaths: string[] = [];
+  
+  try {
+    // List all project directories in Claude CLI cache
+    const projectDirs = await fs.readdir(claudeCliPath);
+    
+    for (const projectDir of projectDirs) {
+      const projectPath = join(claudeCliPath, projectDir);
+      
+      try {
+        const stat = await fs.stat(projectPath);
+        if (stat.isDirectory()) {
+          // Look for mcp-logs-* directories
+          const projectContents = await fs.readdir(projectPath);
+          const mcpDirs = projectContents.filter(dir => dir.startsWith('mcp-logs-'));
+          
+          for (const mcpDir of mcpDirs) {
+            const mcpLogDir = join(projectPath, mcpDir);
+            
+            try {
+              const mcpStat = await fs.stat(mcpLogDir);
+              if (mcpStat.isDirectory()) {
+                // Check if directory contains .txt log files
+                const logFiles = await fs.readdir(mcpLogDir);
+                const txtFiles = logFiles.filter(file => file.endsWith('.txt'));
+                
+                if (txtFiles.length > 0) {
+                  console.log(`📝 Found MCP logs in: ${mcpLogDir} (${txtFiles.length} files)`);
+                  mcpLogPaths.push(mcpLogDir);
+                }
+              }
+            } catch {
+              continue;
+            }
+          }
+        }
+      } catch {
+        continue;
+      }
+    }
+  } catch (error) {
+    console.warn('Failed to scan Claude MCP logs:', error);
+  }
+  
+  return mcpLogPaths;
 }
 
 /**
@@ -417,20 +599,33 @@ async function findClaudeExtensionLogs(vscodeLogDir: string): Promise<string | n
       .sort((a, b) => b.localeCompare(a));
     
     for (const session of sortedSessions) {
-      const claudeExtPath = join(vscodeLogDir, session, 'exthost1', 'Anthropic.claude-code');
-      try {
-        const stat = await fs.stat(claudeExtPath);
-        if (stat.isDirectory()) {
-          // Check if there are actual log files
-          const logFiles = await fs.readdir(claudeExtPath);
-          const claudeLogFiles = logFiles.filter(file => file.includes('Claude') && file.endsWith('.log'));
-          
-          if (claudeLogFiles.length > 0) {
-            return claudeExtPath;
+      // Check multiple possible extension directory structures
+      const possibleClaudeExtPaths = [
+        join(vscodeLogDir, session, 'exthost1', 'Anthropic.claude-code'),
+        join(vscodeLogDir, session, 'exthost', 'Anthropic.claude-code'),
+        join(vscodeLogDir, session, 'extensions', 'Anthropic.claude-code'),
+        join(vscodeLogDir, session, 'Anthropic.claude-code')
+      ];
+      
+      for (const claudeExtPath of possibleClaudeExtPaths) {
+        try {
+          const stat = await fs.stat(claudeExtPath);
+          if (stat.isDirectory()) {
+            // Check if there are actual log files
+            const logFiles = await fs.readdir(claudeExtPath);
+            const claudeLogFiles = logFiles.filter(file => 
+              (file.includes('Claude') || file.includes('claude')) && file.endsWith('.log')
+            );
+            
+            if (claudeLogFiles.length > 0) {
+              // Return the full path to the log file, not just the directory
+              const latestLogFile = claudeLogFiles[claudeLogFiles.length - 1];
+              return join(claudeExtPath, latestLogFile);
+            }
           }
+        } catch {
+          continue;
         }
-      } catch {
-        continue;
       }
     }
   } catch (error) {
@@ -667,6 +862,90 @@ async function detectVSCodeAgent(): Promise<AgentConfig | null> {
     console.log('⚠️  No VS Code installation found');
   } catch (error) {
     console.warn('Failed to detect VS Code agent:', error);
+  }
+  
+  return null;
+}
+
+/**
+ * Detect Gemini CLI agent
+ */
+async function detectGeminiAgent(): Promise<AgentConfig | null> {
+  try {
+    // Define comprehensive paths for all platforms following XDG Base Directory Specification
+    const basePaths = {
+      linux: [
+        // Following XDG Base Directory Specification  
+        join(homedir(), '.local', 'share', 'gemini-cli', 'projects'),
+        join(homedir(), '.local', 'share', 'gemini-cli', 'logs'),
+        // Alternative locations
+        join(homedir(), '.config', 'gemini-cli', 'projects'),
+        join(homedir(), '.config', 'gemini-cli', 'logs'),
+        join(homedir(), '.gemini-cli', 'projects'),
+        join(homedir(), '.gemini-cli', 'logs'),
+        '/var/log/gemini-cli'
+      ],
+      macos: [
+        // macOS Application Support directory
+        join(homedir(), 'Library', 'Application Support', 'Gemini CLI', 'projects'),
+        join(homedir(), 'Library', 'Application Support', 'Gemini CLI', 'logs'),
+        // Alternative locations
+        join(homedir(), 'Library', 'Logs', 'Gemini CLI'),
+        join(homedir(), '.gemini-cli', 'projects'),
+        join(homedir(), '.gemini-cli', 'logs')
+      ],
+      windows: [
+        // Windows AppData directories
+        join(homedir(), 'AppData', 'Local', 'Gemini CLI', 'projects'),
+        join(homedir(), 'AppData', 'Local', 'Gemini CLI', 'logs'),
+        join(homedir(), 'AppData', 'Roaming', 'Gemini CLI', 'projects'),
+        join(homedir(), 'AppData', 'Roaming', 'Gemini CLI', 'logs'),
+        // Alternative locations
+        join(homedir(), '.gemini-cli', 'projects'),
+        join(homedir(), '.gemini-cli', 'logs')
+      ]
+    };
+    
+    const possiblePaths = await generateAgentPaths(basePaths);
+    console.log(`🔍 Checking ${possiblePaths.length} potential Gemini CLI paths...`);
+    
+    const logPaths: string[] = [];
+    
+    for (const logPath of possiblePaths) {
+      try {
+        const stat = await fs.stat(logPath);
+        if (stat.isDirectory()) {
+          console.log(`✅ Found Gemini CLI directory at: ${logPath}`);
+          logPaths.push(logPath);
+        }
+      } catch {
+        continue;
+      }
+    }
+    
+    if (logPaths.length > 0) {
+      console.log(`✅ Found Gemini CLI with ${logPaths.length} log directories`);
+      return {
+        id: 'gemini-cli',
+        name: 'Gemini CLI',
+        type: 'gemini-code-assist',
+        enabled: true,
+        logPaths,
+        logFormat: 'structured',
+        filters: ['debug', 'info', 'warn', 'error'],
+        metadata: {
+          version: '1.0.0',
+          lastDiscovered: new Date().toISOString(),
+          detectedPaths: logPaths,
+          pathCount: logPaths.length,
+          isWSL: await isWSL()
+        }
+      };
+    }
+    
+    console.log('⚠️  No Gemini CLI installation found');
+  } catch (error) {
+    console.warn('Failed to detect Gemini CLI agent:', error);
   }
   
   return null;

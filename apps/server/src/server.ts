@@ -136,6 +136,19 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
     };
   });
 
+  // Initialize database service for custom agents (optional)
+  let databaseService: any = null;
+  if (config.database?.postgresql) {
+    try {
+      const { DatabaseService } = await import('./services/database.service.js');
+      databaseService = new DatabaseService(config.database.postgresql, logger);
+      await databaseService.initialize();
+      logger.info('✅ Database service initialized for custom agents');
+    } catch (error) {
+      logger.warn('⚠️ Database service not available, custom agents disabled:', error);
+    }
+  }
+
   // API endpoints for agents
   await fastify.register(async function apiRoutes(fastify) {
     // Get all available agents
@@ -206,6 +219,280 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
       }
       
       return agent;
+    });
+
+    // Custom Agent Management Routes
+    
+    // Get all custom agents
+    fastify.get('/api/agents/custom', {
+      schema: {
+        description: 'Get all custom agents',
+        tags: ['Custom Agents'],
+        response: {
+          200: {
+            type: 'array',
+            items: { type: 'object' }
+          }
+        }
+      }
+    }, async (request, reply) => {
+      if (!databaseService) {
+        reply.code(503);
+        return { error: 'Database service not available' };
+      }
+      
+      try {
+        const customAgents = await databaseService.getCustomAgents();
+        return customAgents;
+      } catch (error) {
+        logger.error('Failed to get custom agents:', error);
+        reply.code(500);
+        return { error: 'Failed to fetch custom agents' };
+      }
+    });
+
+    // Create a new custom agent
+    fastify.post('/api/agents/custom', {
+      schema: {
+        description: 'Create a new custom agent',
+        tags: ['Custom Agents'],
+        body: {
+          type: 'object',
+          required: ['name', 'type', 'logPaths'],
+          properties: {
+            name: { type: 'string' },
+            type: { type: 'string' },
+            logPaths: { type: 'array', items: { type: 'string' } },
+            logFormat: { type: 'string' },
+            enabled: { type: 'boolean' },
+            filters: { type: 'array', items: { type: 'string' } },
+            metadata: { type: 'object' }
+          }
+        }
+      }
+    }, async (request, reply) => {
+      if (!databaseService) {
+        reply.code(503);
+        return { error: 'Database service not available' };
+      }
+
+      try {
+        const agentData = request.body as any;
+        
+        // Validate required fields
+        if (!agentData.name || !agentData.type || !agentData.logPaths || agentData.logPaths.length === 0) {
+          reply.code(400);
+          return { error: 'Missing required fields: name, type, and logPaths are required' };
+        }
+
+        // Validate log paths exist
+        const { promises: fs } = await import('fs');
+        const validPaths = [];
+        const invalidPaths = [];
+        
+        for (const logPath of agentData.logPaths) {
+          try {
+            const stat = await fs.stat(logPath);
+            if (stat.isFile() || stat.isDirectory()) {
+              validPaths.push(logPath);
+            } else {
+              invalidPaths.push(logPath);
+            }
+          } catch {
+            invalidPaths.push(logPath);
+          }
+        }
+        
+        if (validPaths.length === 0) {
+          reply.code(400);
+          return { error: 'No valid log paths found', invalidPaths };
+        }
+
+        // Create the custom agent
+        const customAgent = await databaseService.createCustomAgent({
+          ...agentData,
+          logPaths: validPaths
+        });
+
+        // Restart log watcher to pick up new agent
+        try {
+          await logWatcherService.restart();
+        } catch (error) {
+          logger.warn('Failed to restart log watcher:', error);
+        }
+
+        reply.code(201);
+        return {
+          success: true,
+          agent: customAgent,
+          validPaths,
+          invalidPaths: invalidPaths.length > 0 ? invalidPaths : undefined
+        };
+      } catch (error) {
+        logger.error('Failed to create custom agent:', error);
+        reply.code(500);
+        return { error: 'Failed to create custom agent' };
+      }
+    });
+
+    // Update a custom agent
+    fastify.put('/api/agents/custom/:id', {
+      schema: {
+        description: 'Update a custom agent',
+        tags: ['Custom Agents'],
+        params: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' }
+          },
+          required: ['id']
+        },
+        body: {
+          type: 'object',
+          properties: {
+            name: { type: 'string' },
+            type: { type: 'string' },
+            logPaths: { type: 'array', items: { type: 'string' } },
+            logFormat: { type: 'string' },
+            enabled: { type: 'boolean' },
+            filters: { type: 'array', items: { type: 'string' } },
+            metadata: { type: 'object' }
+          }
+        }
+      }
+    }, async (request, reply) => {
+      if (!databaseService) {
+        reply.code(503);
+        return { error: 'Database service not available' };
+      }
+
+      try {
+        const { id } = request.params as { id: string };
+        const agentData = request.body as any;
+
+        // Validate log paths if provided
+        if (agentData.logPaths && agentData.logPaths.length > 0) {
+          const { promises: fs } = await import('fs');
+          const validPaths = [];
+          const invalidPaths = [];
+          
+          for (const logPath of agentData.logPaths) {
+            try {
+              const stat = await fs.stat(logPath);
+              if (stat.isFile() || stat.isDirectory()) {
+                validPaths.push(logPath);
+              } else {
+                invalidPaths.push(logPath);
+              }
+            } catch {
+              invalidPaths.push(logPath);
+            }
+          }
+          
+          if (validPaths.length === 0) {
+            reply.code(400);
+            return { error: 'No valid log paths found', invalidPaths };
+          }
+          
+          agentData.logPaths = validPaths;
+        }
+
+        const updatedAgent = await databaseService.updateCustomAgent(id, agentData);
+        
+        if (!updatedAgent) {
+          reply.code(404);
+          return { error: 'Custom agent not found' };
+        }
+
+        // Restart log watcher to pick up changes
+        try {
+          await logWatcherService.restart();
+        } catch (error) {
+          logger.warn('Failed to restart log watcher:', error);
+        }
+
+        return {
+          success: true,
+          agent: updatedAgent
+        };
+      } catch (error) {
+        logger.error('Failed to update custom agent:', error);
+        reply.code(500);
+        return { error: 'Failed to update custom agent' };
+      }
+    });
+
+    // Delete a custom agent
+    fastify.delete('/api/agents/custom/:id', {
+      schema: {
+        description: 'Delete a custom agent',
+        tags: ['Custom Agents'],
+        params: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' }
+          },
+          required: ['id']
+        }
+      }
+    }, async (request, reply) => {
+      if (!databaseService) {
+        reply.code(503);
+        return { error: 'Database service not available' };
+      }
+
+      try {
+        const { id } = request.params as { id: string };
+        
+        const deleted = await databaseService.deleteCustomAgent(id);
+        
+        if (!deleted) {
+          reply.code(404);
+          return { error: 'Custom agent not found' };
+        }
+
+        // Restart log watcher to remove the agent
+        try {
+          await logWatcherService.restart();
+        } catch (error) {
+          logger.warn('Failed to restart log watcher:', error);
+        }
+
+        return { success: true };
+      } catch (error) {
+        logger.error('Failed to delete custom agent:', error);
+        reply.code(500);
+        return { error: 'Failed to delete custom agent' };
+      }
+    });
+
+    // Refresh agent discovery
+    fastify.post('/api/agents/refresh', {
+      schema: {
+        description: 'Refresh agent discovery',
+        tags: ['Agents']
+      }
+    }, async (request, reply) => {
+      try {
+        const agents = await discoverAgents({}, databaseService);
+        
+        // Restart log watcher to pick up any changes
+        try {
+          await logWatcherService.restart();
+        } catch (error) {
+          logger.warn('Failed to restart log watcher:', error);
+        }
+        
+        return {
+          success: true,
+          agents,
+          count: agents.length
+        };
+      } catch (error) {
+        logger.error('Failed to refresh agents:', error);
+        reply.code(500);
+        return { error: 'Failed to refresh agents' };
+      }
     });
 
     // Get log watcher status

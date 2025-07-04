@@ -323,6 +323,12 @@ export class LogWatcherService extends EventEmitter {
         return; // No new content
       }
 
+      // Special handling for Claude MCP JSON files - read entire file
+      if (agent.logFormat === 'claude-mcp-json' && agent.type === 'claude-mcp') {
+        await this.processClaudeMCPJsonFile(filePath, agent, watchedFile);
+        return;
+      }
+
       const fd = await fs.open(filePath, 'r');
       const buffer = Buffer.alloc(stat.size - watchedFile.position);
       await fd.read(buffer, 0, buffer.length, watchedFile.position);
@@ -355,12 +361,62 @@ export class LogWatcherService extends EventEmitter {
   }
 
   /**
+   * Process Claude MCP JSON files - read entire file as JSON array
+   */
+  private async processClaudeMCPJsonFile(filePath: string, agent: AgentConfig, watchedFile: any): Promise<void> {
+    try {
+      const content = await fs.readFile(filePath, 'utf8');
+      
+      // Parse as JSON array
+      const jsonArray = JSON.parse(content);
+      
+      if (Array.isArray(jsonArray)) {
+        // Process each JSON object in the array
+        for (const jsonObj of jsonArray) {
+          const logEntry = this.parseClaudeMCPJsonLog(JSON.stringify(jsonObj), agent, filePath);
+          if (logEntry) {
+            await this.logsService.ingestLog(logEntry);
+            this.emit('log-entry', logEntry);
+          }
+        }
+        
+        console.log(`📖 Processed ${jsonArray.length} Claude MCP JSON entries from ${basename(filePath)}`);
+      } else {
+        // Single JSON object
+        const logEntry = this.parseClaudeMCPJsonLog(content, agent, filePath);
+        if (logEntry) {
+          await this.logsService.ingestLog(logEntry);
+          this.emit('log-entry', logEntry);
+        }
+        
+        console.log(`📖 Processed 1 Claude MCP JSON entry from ${basename(filePath)}`);
+      }
+      
+      // Update position and last activity
+      const stat = await fs.stat(filePath);
+      watchedFile.position = stat.size;
+      watchedFile.lastActivity = new Date();
+      
+    } catch (error) {
+      console.warn(`❌ Failed to process Claude MCP JSON file ${filePath}:`, error);
+      watchedFile.errorCount++;
+      watchedFile.isHealthy = watchedFile.errorCount < 5;
+    }
+  }
+
+  /**
    * Parse a log line into a LogEntry
    */
   private parseLogLine(line: string, agent: AgentConfig, filePath: string): LogEntry | null {
     try {
+      // Special handling for Claude MCP JSON logs
+      if (agent.logFormat === 'claude-mcp-json' && agent.type === 'claude-mcp') {
+        return this.parseClaudeMCPJsonLog(line, agent, filePath);
+      }
+      
       // Special handling for VS Code extension logs (Claude Code format)
-      if (agent.metadata?.isVSCodeExtension && filePath.includes('Anthropic.claude-code')) {
+      if ((agent.logFormat === 'vscode-extension' || agent.metadata?.isVSCodeExtension) && 
+          (filePath.includes('Anthropic.claude-code') || filePath.includes('Claude Code'))) {
         return this.parseVSCodeExtensionLog(line, agent, filePath);
       }
       
@@ -400,6 +456,73 @@ export class LogWatcherService extends EventEmitter {
     } catch (error) {
       console.warn(`❌ Failed to parse log line: ${line.substring(0, 100)}...`, error);
       return null;
+    }
+  }
+
+  /**
+   * Parse Claude MCP JSON logs
+   * Format: JSON objects with error, timestamp, sessionId, cwd fields
+   */
+  private parseClaudeMCPJsonLog(line: string, agent: AgentConfig, filePath: string): LogEntry | null {
+    try {
+      // Parse the JSON content
+      const jsonData = JSON.parse(line.trim());
+      
+      // Extract common fields
+      const timestamp = jsonData.timestamp || new Date().toISOString();
+      const sessionId = jsonData.sessionId || `claude-mcp-${Date.now()}`;
+      const logId = `${agent.id}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      
+      // Determine log level from content
+      let level: 'debug' | 'info' | 'warn' | 'error' | 'fatal' = 'info';
+      let message = '';
+      
+      if (jsonData.error) {
+        level = 'error';
+        message = `Error: ${jsonData.error}`;
+      } else if (jsonData.message) {
+        message = jsonData.message;
+        // Try to detect level from message
+        const lowerMessage = message.toLowerCase();
+        if (lowerMessage.includes('error')) level = 'error';
+        else if (lowerMessage.includes('warn')) level = 'warn';
+        else if (lowerMessage.includes('debug')) level = 'debug';
+      } else if (jsonData.event) {
+        message = `Event: ${jsonData.event}`;
+        level = 'info';
+      } else {
+        message = `MCP Event: ${JSON.stringify(jsonData)}`;
+      }
+      
+      // Extract MCP server name from file path
+      const mcpServerMatch = filePath.match(/mcp-logs-([^/]+)/);
+      const mcpServer = mcpServerMatch ? mcpServerMatch[1] : 'unknown';
+      
+      return {
+        id: logId,
+        timestamp,
+        level,
+        message: message.trim(),
+        source: `claude-mcp-${mcpServer}`,
+        agentType: agent.type,
+        sessionId,
+        metadata: {
+          filePath,
+          agentName: agent.name,
+          parser: 'claude-mcp-json-parser',
+          isClaudeMCP: true,
+          mcpServer,
+          cwd: jsonData.cwd,
+          mcpData: jsonData
+        },
+        raw: line
+      };
+      
+    } catch (error) {
+      console.warn(`❌ Failed to parse Claude MCP JSON log: ${line.substring(0, 100)}...`, error);
+      
+      // If JSON parsing fails, try to treat as regular log line
+      return this.parseBasicLogLine(line, agent, filePath);
     }
   }
 
@@ -800,5 +923,27 @@ export class LogWatcherService extends EventEmitter {
    */
   public getWatchedFilesCount(): number {
     return this.watchers.size;
+  }
+
+  /**
+   * Restart the log watcher with current or new agents
+   */
+  public async restart(agents?: AgentConfig[]): Promise<void> {
+    console.log('🔄 Restarting log watcher...');
+    
+    // Stop existing watchers
+    await this.stopWatching();
+    
+    // If agents provided, use them; otherwise discover agents again
+    if (agents) {
+      await this.startWatching(agents);
+    } else {
+      // Re-discover agents and start watching
+      const { discoverAgents } = await import('./agent-discovery.js');
+      const discoveredAgents = await discoverAgents();
+      await this.startWatching(discoveredAgents);
+    }
+    
+    console.log('✅ Log watcher restarted successfully');
   }
 } 

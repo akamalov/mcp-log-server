@@ -14,6 +14,11 @@
   "scripts": {
     "build": "turbo build",
     "dev": "turbo dev",
+    "start": "./start-dev.sh",
+    "restart": "./start-dev.sh --restart",
+    "start:status": "./start-dev.sh --status",
+    "start:stop": "./start-dev.sh --stop",
+    "start:logs": "./start-dev.sh --logs",
     "test": "turbo test",
     "test:watch": "turbo test:watch",
     "test:coverage": "turbo test:coverage",

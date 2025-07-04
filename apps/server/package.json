@@ -24,12 +24,14 @@
     "@mcp-log-server/mcp-protocol": "workspace:*",
     "@mcp-log-server/types": "workspace:*",
     "fastify": "catalog:",
+    "pg": "^8.11.3",
     "pino": "^9.4.0",
     "pino-pretty": "^11.2.2",
     "redis": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "@types/pg": "^8.11.6",
     "tsx": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

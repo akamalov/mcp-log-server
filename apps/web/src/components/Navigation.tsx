@@ -8,6 +8,7 @@ const navigationItems = [
   { href: '/logs', label: 'Log Viewer' },
   { href: '/analytics', label: 'Analytics' },
   { href: '/analytics/enhanced', label: 'Enhanced Analytics' },
+  { href: '/agents', label: 'Agent Manager' },
   { href: '/dashboard-builder', label: 'Dashboard Builder' }
 ];
 

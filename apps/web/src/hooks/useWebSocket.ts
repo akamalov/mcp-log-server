@@ -63,11 +63,19 @@ export function useWebSocket(options: UseWebSocketOptions) {
     }
 
     console.log('🔄 WebSocket: Attempting to connect to:', url);
+    console.log('🔄 WebSocket: Browser details:', {
+      userAgent: typeof window !== 'undefined' ? window.navigator.userAgent : 'N/A',
+      protocol: typeof window !== 'undefined' ? window.location.protocol : 'N/A',
+      hostname: typeof window !== 'undefined' ? window.location.hostname : 'N/A',
+      port: typeof window !== 'undefined' ? window.location.port : 'N/A'
+    });
     setState(prev => ({ ...prev, isConnecting: true }));
 
     try {
       const ws = new WebSocket(url);
       wsRef.current = ws;
+      
+      console.log('🔄 WebSocket: Created WebSocket object, readyState:', ws.readyState);
 
       ws.onopen = () => {
         console.log('✅ WebSocket connected to:', url);
@@ -93,7 +101,12 @@ export function useWebSocket(options: UseWebSocketOptions) {
       };
 
       ws.onclose = (event) => {
-        console.log('🔌 WebSocket closed:', event.code, event.reason);
+        console.log('🔌 WebSocket closed:', {
+          code: event.code,
+          reason: event.reason,
+          wasClean: event.wasClean,
+          url: url
+        });
         setState(prev => ({
           ...prev,
           isConnected: false,
@@ -105,20 +118,40 @@ export function useWebSocket(options: UseWebSocketOptions) {
 
         if (autoReconnect && reconnectAttemptsRef.current < maxReconnectAttempts && mountedRef.current) {
           reconnectAttemptsRef.current += 1;
-          console.log(`🔄 WebSocket: Reconnection attempt ${reconnectAttemptsRef.current}/${maxReconnectAttempts}`);
+          console.log(`🔄 WebSocket: Reconnection attempt ${reconnectAttemptsRef.current}/${maxReconnectAttempts} (reason: ${event.reason || 'No reason provided'})`);
           setState(prev => ({ ...prev, reconnectAttempts: reconnectAttemptsRef.current }));
           reconnectTimeoutRef.current = setTimeout(connect, reconnectInterval);
+        } else if (reconnectAttemptsRef.current >= maxReconnectAttempts) {
+          console.error('❌ WebSocket: Max reconnection attempts reached');
         }
       };
 
       ws.onerror = (error) => {
-        console.error('❌ WebSocket error:', error);
+        console.error('❌ WebSocket error:', {
+          type: error.type,
+          target: error.target?.readyState,
+          readyState: ws.readyState,
+          url: url,
+          error: error,
+          // Additional debugging information
+          socketState: {
+            0: 'CONNECTING',
+            1: 'OPEN', 
+            2: 'CLOSING',
+            3: 'CLOSED'
+          }[ws.readyState],
+          timestamp: new Date().toISOString()
+        });
         setState(prev => ({ ...prev, isConnecting: false }));
         onError?.(error);
       };
 
     } catch (error) {
-      console.error('❌ Failed to create WebSocket connection:', error);
+      console.error('❌ Failed to create WebSocket connection:', {
+        url: url,
+        error: error,
+        message: error instanceof Error ? error.message : 'Unknown error'
+      });
       setState(prev => ({ ...prev, isConnecting: false }));
     }
   }, [url, autoReconnect, maxReconnectAttempts, reconnectInterval, onMessage, onConnect, onDisconnect, onError]);
