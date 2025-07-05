@@ -18,25 +18,41 @@ export async function PUT(
       );
     }
 
-    // For now, return a mock updated response
-    // TODO: Connect to actual backend endpoint when implemented
-    const updatedAgent = {
-      id,
-      user_id: 'user-1',
+    // Transform frontend data format to backend format
+    const agentData = {
       name: body.name,
       type: body.type || 'custom',
-      config: {},
-      is_active: body.enabled ?? true,
-      auto_discovery: false,
       log_paths: body.logPaths.filter((path: string) => path.trim()),
       format_type: body.logFormat || 'text',
+      is_active: body.enabled ?? true,
       filters: body.filters || ['info', 'warn', 'error'],
-      metadata: { ...body.metadata, updatedBy: 'user' },
-      created_at: new Date('2024-01-01').toISOString(), // Mock created date
-      updated_at: new Date().toISOString(),
+      metadata: { ...body.metadata, updatedBy: 'user' }
     };
 
-    return NextResponse.json(updatedAgent);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
+    const response = await fetch(`${BACKEND_URL}/api/agents/custom/${id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(agentData),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      return NextResponse.json(
+        { error: errorData.error || 'Failed to update custom agent' },
+        { status: response.status }
+      );
+    }
+
+    const data = await response.json();
+    return NextResponse.json(data);
   } catch (error) {
     console.error('Error updating custom agent:', error);
     return NextResponse.json(
@@ -52,16 +68,32 @@ export async function DELETE(
 ) {
   try {
     const { id } = params;
+    console.log('DELETE request for agent ID:', id);
     
-    // For now, return success response since deletion isn't implemented in backend yet
-    // TODO: Connect to actual backend endpoint when implemented
-    console.log(`Deleting agent with ID: ${id}`);
-    
-    return NextResponse.json({ 
-      success: true, 
-      message: 'Agent deleted successfully',
-      id 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
+    console.log('Sending DELETE request to backend:', `${BACKEND_URL}/api/agents/custom/${id}`);
+    const response = await fetch(`${BACKEND_URL}/api/agents/custom/${id}`, {
+      method: 'DELETE',
+      signal: controller.signal,
     });
+
+    clearTimeout(timeoutId);
+    console.log('Backend DELETE response:', response.status, response.statusText);
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.log('Backend DELETE error:', errorData);
+      return NextResponse.json(
+        { error: errorData.error || 'Failed to delete custom agent' },
+        { status: response.status }
+      );
+    }
+
+    const data = await response.json();
+    console.log('Backend DELETE success:', data);
+    return NextResponse.json(data);
   } catch (error) {
     console.error('Error deleting custom agent:', error);
     return NextResponse.json(

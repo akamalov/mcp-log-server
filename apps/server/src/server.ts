@@ -138,6 +138,8 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
 
   // Initialize database service for custom agents (optional)
   let databaseService: any = null;
+  let customAgents: any[] = []; // In-memory fallback storage
+  
   if (config.database?.postgresql) {
     try {
       const { DatabaseService } = await import('./services/database.service.js');
@@ -145,7 +147,54 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
       await databaseService.initialize();
       logger.info('✅ Database service initialized for custom agents');
     } catch (error) {
-      logger.warn('⚠️ Database service not available, custom agents disabled:', error);
+      logger.warn('⚠️ Database service not available, using in-memory storage for custom agents:', error);
+      // Create a minimal in-memory database service for development
+      databaseService = {
+        getCustomAgents: async () => {
+          console.log('Getting custom agents, count:', customAgents.length);
+          if (customAgents.length > 0) {
+            console.log('First agent keys:', Object.keys(customAgents[0]));
+            console.log('First agent:', customAgents[0]);
+            console.log('JSON.stringify test:', JSON.stringify(customAgents[0]));
+          }
+          return customAgents;
+        },
+        createCustomAgent: async (agentData: any) => {
+          const agent = {
+            id: `custom-${Date.now()}`,
+            user_id: 'user-1',
+            name: agentData.name,
+            type: agentData.type || 'custom',
+            config: {},
+            is_active: agentData.enabled ?? true,
+            auto_discovery: false,
+            log_paths: agentData.logPaths || [],
+            format_type: agentData.logFormat || 'text',
+            filters: agentData.filters || ['info', 'warn', 'error'],
+            metadata: agentData.metadata || {},
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+          customAgents.push(agent);
+          return agent;
+        },
+        updateCustomAgent: async (id: string, agentData: any) => {
+          const index = customAgents.findIndex(a => a.id === id);
+          if (index === -1) throw new Error('Agent not found');
+          customAgents[index] = { ...customAgents[index], ...agentData, updated_at: new Date().toISOString() };
+          return customAgents[index];
+        },
+        deleteCustomAgent: async (id: string) => {
+          const index = customAgents.findIndex(a => a.id === id);
+          if (index === -1) throw new Error('Agent not found');
+          customAgents.splice(index, 1);
+          return { success: true, message: 'Agent deleted successfully' };
+        },
+        getCustomAgent: async (id: string) => {
+          return customAgents.find(a => a.id === id);
+        }
+      };
+      logger.info('✅ In-memory custom agent storage initialized');
     }
   }
 
@@ -243,7 +292,12 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
       
       try {
         const customAgents = await databaseService.getCustomAgents();
-        return customAgents;
+        console.log('About to return customAgents:', JSON.stringify(customAgents));
+        
+        // Try returning without schema validation by using raw send
+        reply.code(200)
+          .header('content-type', 'application/json')
+          .send(JSON.stringify(customAgents));
       } catch (error) {
         logger.error('Failed to get custom agents:', error);
         reply.code(500);

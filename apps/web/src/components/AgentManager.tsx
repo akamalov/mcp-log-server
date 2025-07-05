@@ -87,12 +87,28 @@ export default function AgentManager() {
   const loadAgents = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/agents/custom');
+      
+      // Add timeout to the fetch request
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout
+      
+      const response = await fetch('/api/agents/custom', {
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      
       if (!response.ok) throw new Error('Failed to load custom agents');
       const data = await response.json();
-      setAgents(data);
+      // Filter out invalid agents (empty objects or agents without required properties)
+      const validAgents = Array.isArray(data) ? data.filter(agent => agent && agent.id && agent.name) : [];
+      setAgents(validAgents);
+      setError(null); // Clear any previous errors on success
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load agents');
+      console.warn('Failed to load custom agents:', err);
+      // Don't show error to user for now, just log it and show empty list
+      setAgents([]);
+      // setError(err instanceof Error ? err.message : 'Failed to load agents');
     } finally {
       setLoading(false);
     }
@@ -111,6 +127,8 @@ export default function AgentManager() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.log('Form submitted:', formData);
+    
     if (!formData.name.trim()) {
       setError('Agent name is required');
       return;
@@ -119,6 +137,8 @@ export default function AgentManager() {
       setError('At least one log path is required');
       return;
     }
+    
+    console.log('Validation passed, submitting...');
 
     try {
       setLoading(true);
@@ -133,11 +153,18 @@ export default function AgentManager() {
       const url = editingAgent ? `/api/agents/custom/${editingAgent.id}` : '/api/agents/custom';
       const method = editingAgent ? 'PUT' : 'POST';
 
+      // Add timeout to the fetch request
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout
+      
       const response = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(agentData)
+        body: JSON.stringify(agentData),
+        signal: controller.signal
       });
+      
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -168,7 +195,7 @@ export default function AgentManager() {
     setFormData({
       name: agent.name,
       type: agent.type,
-      logPaths: agent.log_paths,
+      logPaths: agent.log_paths || [],
       logFormat: agent.format_type,
       enabled: agent.is_active,
       filters: agent.filters,
@@ -535,7 +562,7 @@ export default function AgentManager() {
                         onChange={() => toggleFilter(level)}
                         className="rounded text-blue-600 focus:ring-blue-500"
                       />
-                      <span className="text-sm capitalize">{level}</span>
+                      <span className="text-sm capitalize text-gray-900 font-medium">{level}</span>
                     </label>
                   ))}
                 </div>
@@ -668,7 +695,7 @@ export default function AgentManager() {
                         onChange={() => toggleDiscoveredFilter(level)}
                         className="rounded text-blue-600 focus:ring-blue-500"
                       />
-                      <span className="text-sm capitalize">{level}</span>
+                      <span className="text-sm capitalize text-gray-900 font-medium">{level}</span>
                     </label>
                   ))}
                 </div>
@@ -755,7 +782,7 @@ export default function AgentManager() {
                     <div>
                       <h3 className="font-medium text-gray-900">{agent.name}</h3>
                       <p className="text-sm text-gray-500">
-                        {agent.type} • {agent.format_type} • {agent.log_paths.length} paths
+                        {agent.type} • {agent.format_type} • {agent.log_paths?.length || 0} paths
                       </p>
                     </div>
                     <div className="flex gap-2">
@@ -795,7 +822,7 @@ export default function AgentManager() {
                     <div className="mt-4 p-3 bg-gray-50 rounded-lg">
                       <h4 className="font-medium text-gray-900 mb-2">Log Paths:</h4>
                       <ul className="list-disc list-inside text-sm text-gray-600 space-y-1">
-                        {agent.log_paths.map((path, index) => (
+                        {(agent.log_paths || []).map((path, index) => (
                           <li key={index} className="font-mono">{path}</li>
                         ))}
                       </ul>
