@@ -245,6 +245,9 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
                     id: { type: 'string' },
                     name: { type: 'string' },
                     available: { type: 'boolean' },
+                    type: { type: 'string' },
+                    isCustom: { type: 'boolean' },
+                    config: { type: 'object' },
                   },
                 },
               },
@@ -258,14 +261,37 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
         const logs = await logsService.getRecentLogs(1000); // Get a good sample of logs
         const uniqueSources = [...new Set(logs.map(log => log.source))];
         
-        // Create agent objects with the actual source names
-        const agents = uniqueSources.map(source => ({
+        // Create agent objects with the actual source names from logs
+        const logAgents = uniqueSources.map(source => ({
           id: source,
           name: source,
-          available: true
+          available: true,
+          type: 'discovered',
+          isCustom: false
         }));
         
-        return { agents };
+        // Get custom agents if database service is available
+        let customAgents = [];
+        if (databaseService) {
+          try {
+            const customAgentsData = await databaseService.getCustomAgents();
+            customAgents = customAgentsData.map(agent => ({
+              id: agent.id,
+              name: agent.name,
+              available: agent.is_active,
+              type: 'custom',
+              config: agent.config,
+              isCustom: true
+            }));
+          } catch (error) {
+            logger.warn('Error fetching custom agents:', error);
+          }
+        }
+        
+        // Combine log agents and custom agents
+        const allAgents = [...logAgents, ...customAgents];
+        
+        return { agents: allAgents };
       } catch (error) {
         logger.error('Failed to get agents', { error });
         // Fallback to predefined agents if database query fails
