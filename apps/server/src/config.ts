@@ -125,9 +125,9 @@ export async function loadConfig(): Promise<ServerConfig> {
       postgresql: {
         host: process.env.POSTGRES_HOST || 'localhost',
         port: Number(process.env.POSTGRES_PORT) || 5432,
-        database: process.env.POSTGRES_DB || 'mcp_logs',
-        username: process.env.POSTGRES_USER || 'postgres',
-        password: process.env.POSTGRES_PASSWORD || 'postgres',
+        database: process.env.POSTGRES_DB || 'mcp_log_server',
+        username: process.env.POSTGRES_USER || 'mcp_user',
+        password: process.env.POSTGRES_PASSWORD || 'mcp_password',
       },
       clickhouse: {
         host: process.env.CLICKHOUSE_HOST || 'localhost',

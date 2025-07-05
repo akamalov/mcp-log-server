@@ -70,11 +70,6 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
   await webSocketService.initialize();
   logger.info('✅ WebSocket service initialized for real-time updates');
 
-  // Discover available agents
-  logger.info('Discovering available agents...');
-  const availableAgents = await discoverAgents();
-  logger.info('Found available agents', { count: availableAgents.length });
-
   // Initialize log watcher service
   const logWatcherService = new LogWatcherService(logsService);
 
@@ -197,6 +192,11 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
       logger.info('✅ In-memory custom agent storage initialized');
     }
   }
+
+  // Discover available agents (after database service is initialized)
+  logger.info('Discovering available agents...');
+  const availableAgents = await discoverAgents({}, databaseService);
+  logger.info('Found available agents', { count: availableAgents.length });
 
   // API endpoints for agents
   await fastify.register(async function apiRoutes(fastify) {

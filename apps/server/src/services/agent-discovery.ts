@@ -519,8 +519,16 @@ async function detectClaudeAgent(): Promise<AgentConfig | null> {
       }
     }
     
-    // Return the first (highest priority) result
+    // Return the best available result with preference for Claude CLI
     if (results.length > 0) {
+      // Prefer Claude CLI/MCP if it has significant activity (multiple log directories)
+      const claudeCliAgent = results.find(r => r.id === 'claude-mcp-cli' && r.logPaths.length >= 5);
+      if (claudeCliAgent) {
+        console.log(`🎯 Selected Claude agent: ${claudeCliAgent.name} (${claudeCliAgent.logPaths.length} log paths) - CLI preferred`);
+        return claudeCliAgent;
+      }
+      
+      // Otherwise, return the first (highest priority) result
       const chosen = results[0];
       console.log(`🎯 Selected Claude agent: ${chosen.name} (${chosen.logPaths.length} log paths)`);
       return chosen;
