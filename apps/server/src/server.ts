@@ -175,8 +175,36 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
         },
         updateCustomAgent: async (id: string, agentData: any) => {
           const index = customAgents.findIndex(a => a.id === id);
-          if (index === -1) throw new Error('Agent not found');
-          customAgents[index] = { ...customAgents[index], ...agentData, updated_at: new Date().toISOString() };
+          if (index === -1) throw new Error(`Agent not found with ID: ${id}`);
+          
+          const currentAgent = customAgents[index];
+          
+          // Transform frontend field names to backend field names
+          const transformedData: any = {};
+          
+          if (agentData.name !== undefined) transformedData.name = agentData.name;
+          if (agentData.type !== undefined) transformedData.type = agentData.type;
+          if (agentData.logPaths !== undefined) {
+            transformedData.log_paths = agentData.logPaths;
+            // Also update the legacy log_path field for compatibility
+            transformedData.log_path = Array.isArray(agentData.logPaths) ? agentData.logPaths[0] : agentData.logPaths;
+            // Update config.logPaths as well
+            transformedData.config = {
+              ...currentAgent.config,
+              logPaths: agentData.logPaths
+            };
+          }
+          if (agentData.logFormat !== undefined) transformedData.format_type = agentData.logFormat;
+          if (agentData.enabled !== undefined) transformedData.is_active = agentData.enabled;
+          if (agentData.filters !== undefined) transformedData.filters = agentData.filters;
+          if (agentData.metadata !== undefined) transformedData.metadata = agentData.metadata;
+          
+          customAgents[index] = { 
+            ...customAgents[index], 
+            ...transformedData, 
+            updated_at: new Date().toISOString() 
+          };
+          
           return customAgents[index];
         },
         deleteCustomAgent: async (id: string) => {
@@ -339,27 +367,43 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
           return { error: 'Missing required fields: name, type, and logPaths are required' };
         }
 
-        // Validate log paths exist
+        // Validate log paths (flexible validation)
         const { promises: fs } = await import('fs');
+        const path = await import('path');
         const validPaths = [];
         const invalidPaths = [];
         
         for (const logPath of agentData.logPaths) {
           try {
+            // First try to check if the path exists (file or directory)
             const stat = await fs.stat(logPath);
             if (stat.isFile() || stat.isDirectory()) {
               validPaths.push(logPath);
-            } else {
-              invalidPaths.push(logPath);
+              continue;
             }
           } catch {
-            invalidPaths.push(logPath);
+            // If the path doesn't exist, check if the parent directory exists and is accessible
+            try {
+              const parentDir = path.dirname(logPath);
+              const parentStat = await fs.stat(parentDir);
+              if (parentStat.isDirectory()) {
+                validPaths.push(logPath); // Parent directory exists, path is potentially valid
+                continue;
+              }
+            } catch {
+              // Parent directory doesn't exist either, but still allow the path
+              // Log files might be created later or be on different mount points
+              validPaths.push(logPath);
+              continue;
+            }
           }
+          invalidPaths.push(logPath);
         }
         
-        if (validPaths.length === 0) {
+        // Only reject if ALL paths are clearly invalid (very lenient)
+        if (validPaths.length === 0 && invalidPaths.length > 0) {
           reply.code(400);
-          return { error: 'No valid log paths found', invalidPaths };
+          return { error: 'No accessible log paths found', invalidPaths };
         }
 
         // Create the custom agent
@@ -423,29 +467,46 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
       try {
         const { id } = request.params as { id: string };
         const agentData = request.body as any;
+        const { skipValidation } = request.query as { skipValidation?: string };
 
-        // Validate log paths if provided
-        if (agentData.logPaths && agentData.logPaths.length > 0) {
+        // Validate log paths if provided (flexible validation), unless skipped
+        if (agentData.logPaths && agentData.logPaths.length > 0 && skipValidation !== 'true') {
           const { promises: fs } = await import('fs');
+          const path = await import('path');
           const validPaths = [];
           const invalidPaths = [];
           
           for (const logPath of agentData.logPaths) {
             try {
+              // First try to check if the path exists (file or directory)
               const stat = await fs.stat(logPath);
               if (stat.isFile() || stat.isDirectory()) {
                 validPaths.push(logPath);
-              } else {
-                invalidPaths.push(logPath);
+                continue;
               }
             } catch {
-              invalidPaths.push(logPath);
+              // If the path doesn't exist, check if the parent directory exists and is accessible
+              try {
+                const parentDir = path.dirname(logPath);
+                const parentStat = await fs.stat(parentDir);
+                if (parentStat.isDirectory()) {
+                  validPaths.push(logPath); // Parent directory exists, path is potentially valid
+                  continue;
+                }
+              } catch {
+                // Parent directory doesn't exist either, but still allow the path
+                // Log files might be created later or be on different mount points
+                validPaths.push(logPath);
+                continue;
+              }
             }
+            invalidPaths.push(logPath);
           }
           
-          if (validPaths.length === 0) {
+          // Only reject if ALL paths are clearly invalid (very lenient)
+          if (validPaths.length === 0 && invalidPaths.length > 0) {
             reply.code(400);
-            return { error: 'No valid log paths found', invalidPaths };
+            return { error: 'No accessible log paths found', invalidPaths };
           }
           
           agentData.logPaths = validPaths;
@@ -470,9 +531,11 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
           agent: updatedAgent
         };
       } catch (error) {
-        logger.error('Failed to update custom agent:', error);
+        const { id } = request.params as { id: string };
+        const agentData = request.body as any;
+        logger.error('Failed to update custom agent:', { error: error.message, stack: error.stack, id, agentData });
         reply.code(500);
-        return { error: 'Failed to update custom agent' };
+        return { error: 'Failed to update custom agent', details: error.message };
       }
     });
 

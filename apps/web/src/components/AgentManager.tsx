@@ -195,7 +195,7 @@ export default function AgentManager() {
     setFormData({
       name: agent.name,
       type: agent.type,
-      logPaths: agent.log_paths || [],
+      logPaths: agent.config?.logPaths || agent.log_paths || [''],
       logFormat: agent.format_type,
       enabled: agent.is_active,
       filters: agent.filters,
@@ -394,535 +394,555 @@ export default function AgentManager() {
   // Don't render anything until mounted on client
   if (!mounted) {
     return (
-      <div className="p-6 max-w-6xl mx-auto">
-        <div className="animate-pulse">
-          <div className="h-8 bg-gray-200 rounded w-1/4 mb-6"></div>
-          <div className="h-64 bg-gray-200 rounded"></div>
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-8">
+        <div className="max-w-7xl mx-auto">
+          <div className="text-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+            <p className="mt-4 text-gray-600 dark:text-gray-300">Loading agent manager...</p>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Agent Manager</h1>
-        <div className="flex gap-2">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-8">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Agent Manager</h1>
+          <p className="text-gray-600 dark:text-gray-300 mt-2">Manage custom agents and view auto-discovered agents</p>
+        </div>
+
+        {/* Action Buttons */}
+        <div className="mb-6 flex justify-end gap-2">
           <button
             onClick={handleRefresh}
             disabled={loading}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
           <button
             onClick={() => setShowForm(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
           >
             <Plus className="w-4 h-4" />
             Add Custom Agent
           </button>
         </div>
-      </div>
 
-      {/* Status Messages */}
-      {error && (
-        <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-lg flex items-center gap-2">
-          <AlertCircle className="w-5 h-5" />
-          {error}
-          <button onClick={() => setError(null)} className="ml-auto">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-
-      {success && (
-        <div className="mb-4 p-3 bg-green-100 border border-green-400 text-green-700 rounded-lg flex items-center gap-2">
-          <CheckCircle className="w-5 h-5" />
-          {success}
-          <button onClick={() => setSuccess(null)} className="ml-auto">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-
-      {/* Agent Form Modal */}
-      {showForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold">
-                {editingAgent ? 'Edit Agent' : 'Add Custom Agent'}
-              </h2>
-              <button onClick={resetForm} className="text-gray-500 hover:text-gray-700">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSubmit} className="space-y-4">
-              {/* Agent Name */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Agent Name *
-                </label>
-                <input
-                  type="text"
-                  value={formData.name}
-                  onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-black bg-white placeholder-gray-400"
-                  placeholder="My Custom Agent"
-                  required
-                />
-              </div>
-
-              {/* Agent Type */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Agent Type
-                </label>
-                <select
-                  value={formData.type}
-                  onChange={(e) => setFormData(prev => ({ ...prev, type: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-black bg-white"
-                >
-                  {AGENT_TYPES.map(type => (
-                    <option key={type.value} value={type.value} className="text-black bg-white">
-                      {type.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Log Format */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Log Format
-                </label>
-                <select
-                  value={formData.logFormat}
-                  onChange={(e) => setFormData(prev => ({ ...prev, logFormat: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-black bg-white"
-                >
-                  {LOG_FORMATS.map(format => (
-                    <option key={format.value} value={format.value} className="text-black bg-white">
-                      {format.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Log Paths */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Log Paths *
-                </label>
-                <div className="space-y-2">
-                  {formData.logPaths.map((path, index) => (
-                    <div key={index} className="flex gap-2">
-                      <input
-                        type="text"
-                        value={path}
-                        onChange={(e) => updateLogPath(index, e.target.value)}
-                        className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-black bg-white placeholder-gray-400"
-                        placeholder="/path/to/log/file.log or /path/to/log/directory"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => removeLogPath(index)}
-                        className="px-3 py-2 text-red-600 hover:text-red-800"
-                        disabled={formData.logPaths.length === 1}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={addLogPath}
-                    className="flex items-center gap-2 px-3 py-2 text-blue-600 hover:text-blue-800"
-                  >
-                    <Plus className="w-4 h-4" />
-                    Add Log Path
-                  </button>
-                </div>
-              </div>
-
-              {/* Log Level Filters */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Log Level Filters
-                </label>
-                <div className="flex flex-wrap gap-2">
-                  {LOG_LEVELS.map(level => (
-                    <label key={level} className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={formData.filters.includes(level)}
-                        onChange={() => toggleFilter(level)}
-                        className="rounded text-blue-600 focus:ring-blue-500"
-                      />
-                      <span className="text-sm capitalize text-gray-900 font-medium">{level}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              {/* Enabled Toggle */}
-              <div>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={formData.enabled}
-                    onChange={(e) => setFormData(prev => ({ ...prev, enabled: e.target.checked }))}
-                    className="rounded text-blue-600 focus:ring-blue-500"
-                  />
-                  <span className="text-sm font-medium text-gray-700">
-                    Enable Agent
-                  </span>
-                </label>
-              </div>
-
-              {/* Form Actions */}
-              <div className="flex gap-3 pt-4">
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                >
-                  <Save className="w-4 h-4" />
-                  {editingAgent ? 'Update Agent' : 'Create Agent'}
-                </button>
-                <button
-                  type="button"
-                  onClick={resetForm}
-                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
+        {/* Status Messages */}
+        {error && (
+          <div className="mb-6 p-3 bg-red-100 dark:bg-red-900/20 border border-red-400 dark:border-red-700 text-red-700 dark:text-red-300 rounded-lg flex items-center gap-2">
+            <AlertCircle className="w-5 h-5" />
+            {error}
+            <button onClick={() => setError(null)} className="ml-auto">
+              <X className="w-4 h-4" />
+            </button>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Discovered Agent Edit Modal */}
-      {editingDiscoveredAgent && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold">
-                Edit & Convert Discovered Agent: {editingDiscoveredAgent.name}
-              </h2>
-              <button onClick={resetDiscoveredForm} className="text-gray-500 hover:text-gray-700">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-              <p className="text-sm text-blue-800">
-                <strong>Note:</strong> Editing this discovered agent will convert it to a custom agent that you can fully manage.
-                The original auto-discovered agent will remain unchanged.
-              </p>
-            </div>
-
-            <div className="space-y-4">
-              {/* Log Format */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Log Format
-                </label>
-                <select
-                  value={discoveredAgentForm.logFormat}
-                  onChange={(e) => setDiscoveredAgentForm(prev => ({ ...prev, logFormat: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-black bg-white"
-                >
-                  {LOG_FORMATS.map(format => (
-                    <option key={format.value} value={format.value} className="text-black bg-white">
-                      {format.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Log Paths */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Log Paths *
-                </label>
-                <div className="space-y-2">
-                  {discoveredAgentForm.logPaths.map((path, index) => (
-                    <div key={index} className="flex gap-2">
-                      <input
-                        type="text"
-                        value={path}
-                        onChange={(e) => updateDiscoveredLogPath(index, e.target.value)}
-                        className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-black bg-white placeholder-gray-400"
-                        placeholder="/path/to/log/file.log or /path/to/log/directory"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => removeDiscoveredLogPath(index)}
-                        className="px-3 py-2 text-red-600 hover:text-red-800"
-                        disabled={discoveredAgentForm.logPaths.length === 1}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={addDiscoveredLogPath}
-                    className="flex items-center gap-2 px-3 py-2 text-blue-600 hover:text-blue-800"
-                  >
-                    <Plus className="w-4 h-4" />
-                    Add Log Path
-                  </button>
-                </div>
-              </div>
-
-              {/* Log Level Filters */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Log Level Filters
-                </label>
-                <div className="flex flex-wrap gap-2">
-                  {LOG_LEVELS.map(level => (
-                    <label key={level} className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={discoveredAgentForm.filters.includes(level)}
-                        onChange={() => toggleDiscoveredFilter(level)}
-                        className="rounded text-blue-600 focus:ring-blue-500"
-                      />
-                      <span className="text-sm capitalize text-gray-900 font-medium">{level}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              {/* Enabled Toggle */}
-              <div>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={discoveredAgentForm.enabled}
-                    onChange={(e) => setDiscoveredAgentForm(prev => ({ ...prev, enabled: e.target.checked }))}
-                    className="rounded text-blue-600 focus:ring-blue-500"
-                  />
-                  <span className="text-sm font-medium text-gray-700">
-                    Enable Agent
-                  </span>
-                </label>
-              </div>
-
-              {/* Original Discovery Info */}
-              <div className="p-3 bg-gray-50 rounded-lg">
-                <h4 className="font-medium text-gray-900 mb-2">Original Discovery Info:</h4>
-                <div className="grid grid-cols-2 gap-2 text-sm text-gray-600">
-                  <div><strong>Source:</strong> {editingDiscoveredAgent.metadata?.source}</div>
-                  <div><strong>Confidence:</strong> {((editingDiscoveredAgent.metadata?.confidence || 0) * 100).toFixed(1)}%</div>
-                  <div><strong>Type:</strong> {editingDiscoveredAgent.type}</div>
-                  <div><strong>Original Paths:</strong> {editingDiscoveredAgent.logPaths?.length || 0}</div>
-                </div>
-                {editingDiscoveredAgent.logPaths && editingDiscoveredAgent.logPaths.length > 0 && (
-                  <div className="mt-2">
-                    <strong className="text-gray-700">Original discovered paths:</strong>
-                    <ul className="list-disc list-inside text-xs text-gray-600 mt-1">
-                      {editingDiscoveredAgent.logPaths.slice(0, 3).map((path, index) => (
-                        <li key={index} className="font-mono truncate">{path}</li>
-                      ))}
-                      {editingDiscoveredAgent.logPaths.length > 3 && (
-                        <li className="text-gray-500">... and {editingDiscoveredAgent.logPaths.length - 3} more</li>
-                      )}
-                    </ul>
-                  </div>
-                )}
-              </div>
-
-              {/* Form Actions */}
-              <div className="flex gap-3 pt-4">
-                <button
-                  onClick={handleSaveDiscoveredAgent}
-                  disabled={loading || discoveredAgentForm.logPaths.every(path => !path.trim())}
-                  className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
-                >
-                  <Save className="w-4 h-4" />
-                  Convert to Custom Agent
-                </button>
-                <button
-                  type="button"
-                  onClick={resetDiscoveredForm}
-                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
+        {success && (
+          <div className="mb-6 p-3 bg-green-100 dark:bg-green-900/20 border border-green-400 dark:border-green-700 text-green-700 dark:text-green-300 rounded-lg flex items-center gap-2">
+            <CheckCircle className="w-5 h-5" />
+            {success}
+            <button onClick={() => setSuccess(null)} className="ml-auto">
+              <X className="w-4 h-4" />
+            </button>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Agents List */}
-      <div className="space-y-6">
-        {/* Custom Agents */}
-        <div>
-          <h2 className="text-lg font-semibold text-gray-900 mb-3">
-            Custom Agents ({agents.length})
-          </h2>
-          {agents.length === 0 ? (
-            <div className="text-center py-8 text-gray-500">
-              No custom agents configured. Click "Add Custom Agent" to get started.
-            </div>
-          ) : (
-            <div className="grid gap-4">
-              {agents.map(agent => (
-                <div key={agent.id} className="bg-white border border-gray-200 rounded-lg p-4">
-                  <div className="flex justify-between items-start mb-3">
-                    <div>
-                      <h3 className="font-medium text-gray-900">{agent.name}</h3>
-                      <p className="text-sm text-gray-500">
-                        {agent.type} • {agent.format_type} • {agent.log_paths?.length || 0} paths
-                      </p>
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => setShowDetails(showDetails === agent.id ? null : agent.id)}
-                        className="p-2 text-gray-500 hover:text-gray-700"
-                      >
-                        {showDetails === agent.id ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
-                      <button
-                        onClick={() => handleEdit(agent)}
-                        className="p-2 text-blue-600 hover:text-blue-800"
-                      >
-                        <Edit className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(agent.id)}
-                        className="p-2 text-red-600 hover:text-red-800"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
+        {/* Agent Form Modal */}
+        {showForm && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-lg p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-bold">
+                  {editingAgent ? 'Edit Agent' : 'Add Custom Agent'}
+                </h2>
+                <button onClick={resetForm} className="text-gray-500 hover:text-gray-700">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleSubmit} className="space-y-4">
+                {/* Agent Name */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Agent Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.name}
+                    onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-black bg-white placeholder-gray-400"
+                    placeholder="My Custom Agent"
+                    required
+                  />
+                </div>
+
+                {/* Agent Type */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Agent Type
+                  </label>
+                  <select
+                    value={formData.type}
+                    onChange={(e) => setFormData(prev => ({ ...prev, type: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-black bg-white"
+                  >
+                    {AGENT_TYPES.map(type => (
+                      <option key={type.value} value={type.value} className="text-black bg-white">
+                        {type.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Log Format */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Log Format
+                  </label>
+                  <select
+                    value={formData.logFormat}
+                    onChange={(e) => setFormData(prev => ({ ...prev, logFormat: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-black bg-white"
+                  >
+                    {LOG_FORMATS.map(format => (
+                      <option key={format.value} value={format.value} className="text-black bg-white">
+                        {format.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Log Paths */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Log Paths *
+                  </label>
+                  <div className="space-y-2">
+                    {formData.logPaths.map((path, index) => (
+                      <div key={index} className="flex gap-2">
+                        <input
+                          type="text"
+                          value={path}
+                          onChange={(e) => updateLogPath(index, e.target.value)}
+                          className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-black bg-white placeholder-gray-400"
+                          placeholder="/path/to/log/file.log or /path/to/log/directory"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeLogPath(index)}
+                          className="px-3 py-2 text-red-600 hover:text-red-800"
+                          disabled={formData.logPaths.length === 1}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={addLogPath}
+                      className="flex items-center gap-2 px-3 py-2 text-blue-600 hover:text-blue-800"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Add Log Path
+                    </button>
                   </div>
-                  
-                  <div className="flex items-center gap-4 text-sm text-gray-600">
-                    <span className={`px-2 py-1 rounded-full text-xs ${
-                      agent.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                    }`}>
-                      {agent.is_active ? 'Active' : 'Inactive'}
+                </div>
+
+                {/* Log Level Filters */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Log Level Filters
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {LOG_LEVELS.map(level => (
+                      <label key={level} className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={formData.filters.includes(level)}
+                          onChange={() => toggleFilter(level)}
+                          className="rounded text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-sm capitalize text-gray-900 font-medium">{level}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Enabled Toggle */}
+                <div>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={formData.enabled}
+                      onChange={(e) => setFormData(prev => ({ ...prev, enabled: e.target.checked }))}
+                      className="rounded text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-sm font-medium text-gray-700">
+                      Enable Agent
                     </span>
-                    <span>Filters: {agent.filters.join(', ')}</span>
-                    <span>Created: {new Date(agent.created_at).toLocaleDateString()}</span>
-                  </div>
+                  </label>
+                </div>
 
-                  {/* Detailed View */}
-                  {showDetails === agent.id && (
-                    <div className="mt-4 p-3 bg-gray-50 rounded-lg">
-                      <h4 className="font-medium text-gray-900 mb-2">Log Paths:</h4>
-                      <ul className="list-disc list-inside text-sm text-gray-600 space-y-1">
-                        {(agent.log_paths || []).map((path, index) => (
-                          <li key={index} className="font-mono">{path}</li>
+                {/* Form Actions */}
+                <div className="flex gap-3 pt-4">
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    <Save className="w-4 h-4" />
+                    {editingAgent ? 'Update Agent' : 'Create Agent'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={resetForm}
+                    className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Discovered Agent Edit Modal */}
+        {editingDiscoveredAgent && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-lg p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-bold">
+                  Edit & Convert Discovered Agent: {editingDiscoveredAgent.name}
+                </h2>
+                <button onClick={resetDiscoveredForm} className="text-gray-500 hover:text-gray-700">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                <p className="text-sm text-blue-800">
+                  <strong>Note:</strong> Editing this discovered agent will convert it to a custom agent that you can fully manage.
+                  The original auto-discovered agent will remain unchanged.
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                {/* Log Format */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Log Format
+                  </label>
+                  <select
+                    value={discoveredAgentForm.logFormat}
+                    onChange={(e) => setDiscoveredAgentForm(prev => ({ ...prev, logFormat: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-black bg-white"
+                  >
+                    {LOG_FORMATS.map(format => (
+                      <option key={format.value} value={format.value} className="text-black bg-white">
+                        {format.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Log Paths */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Log Paths *
+                  </label>
+                  <div className="space-y-2">
+                    {discoveredAgentForm.logPaths.map((path, index) => (
+                      <div key={index} className="flex gap-2">
+                        <input
+                          type="text"
+                          value={path}
+                          onChange={(e) => updateDiscoveredLogPath(index, e.target.value)}
+                          className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-black bg-white placeholder-gray-400"
+                          placeholder="/path/to/log/file.log or /path/to/log/directory"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeDiscoveredLogPath(index)}
+                          className="px-3 py-2 text-red-600 hover:text-red-800"
+                          disabled={discoveredAgentForm.logPaths.length === 1}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={addDiscoveredLogPath}
+                      className="flex items-center gap-2 px-3 py-2 text-blue-600 hover:text-blue-800"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Add Log Path
+                    </button>
+                  </div>
+                </div>
+
+                {/* Log Level Filters */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Log Level Filters
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {LOG_LEVELS.map(level => (
+                      <label key={level} className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={discoveredAgentForm.filters.includes(level)}
+                          onChange={() => toggleDiscoveredFilter(level)}
+                          className="rounded text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-sm capitalize text-gray-900 font-medium">{level}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Enabled Toggle */}
+                <div>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={discoveredAgentForm.enabled}
+                      onChange={(e) => setDiscoveredAgentForm(prev => ({ ...prev, enabled: e.target.checked }))}
+                      className="rounded text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-sm font-medium text-gray-700">
+                      Enable Agent
+                    </span>
+                  </label>
+                </div>
+
+                {/* Original Discovery Info */}
+                <div className="p-3 bg-gray-50 rounded-lg">
+                  <h4 className="font-medium text-gray-900 mb-2">Original Discovery Info:</h4>
+                  <div className="grid grid-cols-2 gap-2 text-sm text-gray-600">
+                    <div><strong>Source:</strong> {editingDiscoveredAgent.metadata?.source}</div>
+                    <div><strong>Confidence:</strong> {((editingDiscoveredAgent.metadata?.confidence || 0) * 100).toFixed(1)}%</div>
+                    <div><strong>Type:</strong> {editingDiscoveredAgent.type}</div>
+                    <div><strong>Original Paths:</strong> {editingDiscoveredAgent.logPaths?.length || 0}</div>
+                  </div>
+                  {editingDiscoveredAgent.logPaths && editingDiscoveredAgent.logPaths.length > 0 && (
+                    <div className="mt-2">
+                      <strong className="text-gray-700">Original discovered paths:</strong>
+                      <ul className="list-disc list-inside text-xs text-gray-600 mt-1">
+                        {editingDiscoveredAgent.logPaths.slice(0, 3).map((path, index) => (
+                          <li key={index} className="font-mono truncate">{path}</li>
                         ))}
+                        {editingDiscoveredAgent.logPaths.length > 3 && (
+                          <li className="text-gray-500">... and {editingDiscoveredAgent.logPaths.length - 3} more</li>
+                        )}
                       </ul>
-                      {agent.metadata && Object.keys(agent.metadata).length > 0 && (
-                        <>
-                          <h4 className="font-medium text-gray-900 mt-3 mb-2">Metadata:</h4>
-                          <pre className="text-sm text-gray-600 bg-white p-2 rounded border">
-                            {JSON.stringify(agent.metadata, null, 2)}
-                          </pre>
-                        </>
-                      )}
                     </div>
                   )}
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
 
-        {/* Discovered Agents */}
-        <div>
-          <h2 className="text-lg font-semibold text-gray-900 mb-3">
-            Discovered Agents ({discoveredAgents.length})
-          </h2>
-          {discoveredAgents.length === 0 ? (
-            <div className="text-center py-8 text-gray-500">
-              No agents discovered automatically.
+                {/* Form Actions */}
+                <div className="flex gap-3 pt-4">
+                  <button
+                    onClick={handleSaveDiscoveredAgent}
+                    disabled={loading || discoveredAgentForm.logPaths.every(path => !path.trim())}
+                    className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+                  >
+                    <Save className="w-4 h-4" />
+                    Convert to Custom Agent
+                  </button>
+                  <button
+                    type="button"
+                    onClick={resetDiscoveredForm}
+                    className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
             </div>
-          ) : (
-            <div className="grid gap-4">
-              {discoveredAgents.map(agent => (
-                <div key={agent.id} className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                  <div className="flex justify-between items-start mb-3">
-                    <div>
-                      <h3 className="font-medium text-gray-900">{agent.name}</h3>
-                      <p className="text-sm text-gray-500">
-                        {agent.type} • {agent.logFormat} • {agent.logPaths?.length || 0} paths
-                      </p>
+          </div>
+        )}
+
+        {/* Agents List */}
+        <div className="space-y-6">
+          {/* Custom Agents */}
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+              Custom Agents ({agents.length})
+            </h2>
+            {agents.length === 0 ? (
+              <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                No custom agents configured. Click "Add Custom Agent" to get started.
+              </div>
+            ) : (
+              <div className="grid gap-4">
+                {agents.map(agent => (
+                  <div key={agent.id} className="bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg p-4">
+                    <div className="flex justify-between items-start mb-3">
+                      <div>
+                        <h3 className="font-medium text-gray-900 dark:text-white">{agent.name}</h3>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">
+                          {agent.type} • {agent.format_type} • {(agent.config?.logPaths || agent.log_paths || []).length} paths
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setShowDetails(showDetails === agent.id ? null : agent.id)}
+                          className="p-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+                        >
+                          {showDetails === agent.id ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                        <button
+                          onClick={() => handleEdit(agent)}
+                          className="p-2 text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 transition-colors"
+                        >
+                          <Edit className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(agent.id)}
+                          className="p-2 text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 transition-colors"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setShowDetails(showDetails === agent.id ? null : agent.id)}
-                        className="p-2 text-blue-600 hover:text-blue-800"
-                        title="View discovered paths"
-                      >
-                        {showDetails === agent.id ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
-                      <button
-                        onClick={() => handleEditDiscoveredAgent(agent)}
-                        className="p-2 text-green-600 hover:text-green-800"
-                        title="Edit and convert to custom agent"
-                      >
-                        <Edit className="w-4 h-4" />
-                      </button>
-                      <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full">
-                        Auto-discovered
+                    
+                    <div className="flex items-center gap-4 text-sm text-gray-600 dark:text-gray-300">
+                      <span className={`px-2 py-1 rounded-full text-xs ${
+                        agent.is_active 
+                          ? 'bg-green-100 dark:bg-green-900/20 text-green-800 dark:text-green-400' 
+                          : 'bg-gray-100 dark:bg-gray-600 text-gray-800 dark:text-gray-300'
+                      }`}>
+                        {agent.is_active ? 'Active' : 'Inactive'}
                       </span>
+                      <span>Filters: {agent.filters.join(', ')}</span>
+                      <span>Created: {new Date(agent.created_at).toLocaleDateString()}</span>
                     </div>
-                  </div>
-                  
-                  <div className="flex items-center gap-4 text-sm text-gray-600 mb-2">
-                    <span>Status: {agent.metadata?.status || 'unknown'}</span>
-                    <span>Confidence: {((agent.metadata?.confidence || 0) * 100).toFixed(0)}%</span>
-                    <span>Last discovered: {new Date(agent.metadata?.lastDiscovered || Date.now()).toLocaleDateString()}</span>
-                  </div>
 
-                  {/* Detailed View for Discovered Agents */}
-                  {showDetails === agent.id && (
-                    <div className="mt-4 p-3 bg-white rounded-lg border border-blue-200">
-                      <h4 className="font-medium text-gray-900 mb-2">Auto-discovered Log Paths:</h4>
-                      <ul className="list-disc list-inside text-sm text-gray-600 space-y-1">
-                        {agent.logPaths?.map((path, index) => (
-                          <li key={index} className="font-mono">{path}</li>
-                        )) || <li className="text-gray-400">No paths available</li>}
-                      </ul>
-                      
-                      {agent.metadata && (
-                        <>
-                          <h4 className="font-medium text-gray-900 mt-3 mb-2">Discovery Metadata:</h4>
-                          <div className="text-sm text-gray-600 bg-white p-2 rounded border">
-                            <div className="grid grid-cols-2 gap-2">
-                              <div><strong>Source:</strong> {agent.metadata.source}</div>
-                              <div><strong>Confidence:</strong> {((agent.metadata.confidence || 0) * 100).toFixed(1)}%</div>
-                              <div><strong>Status:</strong> {agent.metadata.status}</div>
-                              <div><strong>Log Format:</strong> {agent.logFormat}</div>
-                            </div>
-                            {agent.metadata.lastDiscovered && (
-                              <div className="mt-2">
-                                <strong>Last Discovered:</strong> {new Date(agent.metadata.lastDiscovered).toLocaleString()}
-                              </div>
-                            )}
-                          </div>
-                        </>
-                      )}
+                    {/* Detailed View */}
+                    {showDetails === agent.id && (
+                      <div className="mt-4 p-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600">
+                        <h4 className="font-medium text-gray-900 dark:text-white mb-2">Log Paths:</h4>
+                        <ul className="list-disc list-inside text-sm text-gray-600 dark:text-gray-300 space-y-1">
+                          {(agent.config?.logPaths || agent.log_paths || []).length > 0 ? (
+                            (agent.config?.logPaths || agent.log_paths || []).map((path, index) => (
+                              <li key={index} className="font-mono">{path}</li>
+                            ))
+                          ) : (
+                            <li className="text-gray-400 dark:text-gray-500">No log paths configured</li>
+                          )}
+                        </ul>
+                        {agent.metadata && Object.keys(agent.metadata).length > 0 && (
+                          <>
+                            <h4 className="font-medium text-gray-900 dark:text-white mt-3 mb-2">Metadata:</h4>
+                            <pre className="text-sm text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-900 p-2 rounded border border-gray-200 dark:border-gray-600 overflow-auto">
+                              {JSON.stringify(agent.metadata, null, 2)}
+                            </pre>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Discovered Agents */}
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+              Discovered Agents ({discoveredAgents.length})
+            </h2>
+            {discoveredAgents.length === 0 ? (
+              <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                No agents discovered automatically.
+              </div>
+            ) : (
+              <div className="grid gap-4">
+                {discoveredAgents.map(agent => (
+                  <div key={agent.id} className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-lg p-4">
+                    <div className="flex justify-between items-start mb-3">
+                      <div>
+                        <h3 className="font-medium text-gray-900 dark:text-white">{agent.name}</h3>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">
+                          {agent.type} • {agent.logFormat} • {agent.logPaths?.length || 0} paths
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setShowDetails(showDetails === agent.id ? null : agent.id)}
+                          className="p-2 text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 transition-colors"
+                          title="View discovered paths"
+                        >
+                          {showDetails === agent.id ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                        <button
+                          onClick={() => handleEditDiscoveredAgent(agent)}
+                          className="p-2 text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-300 transition-colors"
+                          title="Edit and convert to custom agent"
+                        >
+                          <Edit className="w-4 h-4" />
+                        </button>
+                        <span className="px-2 py-1 bg-blue-100 dark:bg-blue-800/30 text-blue-800 dark:text-blue-300 text-xs rounded-full">
+                          Auto-discovered
+                        </span>
+                      </div>
                     </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
+                    
+                    <div className="flex items-center gap-4 text-sm text-gray-600 dark:text-gray-300 mb-2">
+                      <span className={`px-2 py-1 rounded-full text-xs ${
+                        (agent.metadata?.status || 'unknown') === 'active'
+                          ? 'bg-green-100 dark:bg-green-900/20 text-green-800 dark:text-green-400' 
+                          : 'bg-gray-100 dark:bg-gray-600 text-gray-800 dark:text-gray-300'
+                      }`}>
+                        {(agent.metadata?.status || 'unknown') === 'active' ? 'Active' : 'Inactive'}
+                      </span>
+                      <span>Confidence: {((agent.metadata?.confidence || 0) * 100).toFixed(0)}%</span>
+                      <span>Last discovered: {new Date(agent.metadata?.lastDiscovered || Date.now()).toLocaleDateString()}</span>
+                    </div>
+
+                    {/* Detailed View for Discovered Agents */}
+                    {showDetails === agent.id && (
+                      <div className="mt-4 p-3 bg-white dark:bg-gray-800 rounded-lg border border-blue-200 dark:border-blue-600">
+                        <h4 className="font-medium text-gray-900 dark:text-white mb-2">Auto-discovered Log Paths:</h4>
+                        <ul className="list-disc list-inside text-sm text-gray-600 dark:text-gray-300 space-y-1">
+                          {agent.logPaths?.map((path, index) => (
+                            <li key={index} className="font-mono">{path}</li>
+                          )) || <li className="text-gray-400 dark:text-gray-500">No paths available</li>}
+                        </ul>
+                        
+                        {agent.metadata && (
+                          <>
+                            <h4 className="font-medium text-gray-900 dark:text-white mt-3 mb-2">Discovery Metadata:</h4>
+                            <div className="text-sm text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-900 p-2 rounded border border-gray-200 dark:border-gray-600">
+                              <div className="grid grid-cols-2 gap-2">
+                                <div><strong>Source:</strong> {agent.metadata.source}</div>
+                                <div><strong>Confidence:</strong> {((agent.metadata.confidence || 0) * 100).toFixed(1)}%</div>
+                                <div><strong>Status:</strong> {agent.metadata.status}</div>
+                                <div><strong>Log Format:</strong> {agent.logFormat}</div>
+                              </div>
+                              {agent.metadata.lastDiscovered && (
+                                <div className="mt-2">
+                                  <strong>Last Discovered:</strong> {new Date(agent.metadata.lastDiscovered).toLocaleString()}
+                                </div>
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

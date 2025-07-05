@@ -80,16 +80,16 @@ export class DatabaseService {
         [
           agent.name,
           agent.type,
-          {
+          JSON.stringify({
             logPaths: agent.logPaths,
             metadata: agent.metadata || {},
             isCustom: true
-          },
+          }),
           agent.enabled !== false,
           false, // Custom agents are not auto-discovered
           agent.logPaths[0] || '', // Primary log path
           agent.logFormat || 'structured',
-          agent.filters || ['info', 'warn', 'error']
+          JSON.stringify(agent.filters || ['info', 'warn', 'error'])
         ]
       );
 
@@ -119,11 +119,11 @@ export class DatabaseService {
 
       if (updates.logPaths !== undefined) {
         setParts.push(`config = $${paramIndex++}`);
-        values.push({
+        values.push(JSON.stringify({
           logPaths: updates.logPaths,
           metadata: updates.metadata || {},
           isCustom: true
-        });
+        }));
         
         setParts.push(`log_path = $${paramIndex++}`);
         values.push(updates.logPaths[0] || '');
@@ -141,7 +141,7 @@ export class DatabaseService {
 
       if (updates.filters !== undefined) {
         setParts.push(`filters = $${paramIndex++}`);
-        values.push(updates.filters);
+        values.push(JSON.stringify(updates.filters));
       }
 
       if (setParts.length === 0) {
