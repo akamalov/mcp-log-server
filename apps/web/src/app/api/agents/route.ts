@@ -4,13 +4,12 @@ const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3001';
 
 export async function GET(request: NextRequest) {
   try {
-    // Forward request to backend
-    const response = await fetch(`${BACKEND_URL}/mcp/tools/get_agent_status`, {
-      method: 'POST',
+    // Forward request to backend's direct agents API
+    const response = await fetch(`${BACKEND_URL}/api/agents`, {
+      method: 'GET',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({}), // Empty body for getting all agents
     });
 
     if (!response.ok) {
@@ -19,10 +18,8 @@ export async function GET(request: NextRequest) {
 
     const data = await response.json();
     
-    // Extract agent status from MCP format
-    const agents = data.content?.[0]?.text ? JSON.parse(data.content[0].text) : [];
-    
-    return NextResponse.json(agents);
+    // Return agents directly from the backend API
+    return NextResponse.json(data);
   } catch (error) {
     console.error('Error fetching agents:', error);
     return NextResponse.json(

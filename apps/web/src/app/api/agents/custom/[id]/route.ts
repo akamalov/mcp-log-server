@@ -18,13 +18,13 @@ export async function PUT(
       );
     }
 
-    // Transform frontend data format to backend format
+    // Keep frontend data format - backend now handles the transformation
     const agentData = {
       name: body.name,
       type: body.type || 'custom',
-      log_paths: body.logPaths.filter((path: string) => path.trim()),
-      format_type: body.logFormat || 'text',
-      is_active: body.enabled ?? true,
+      logPaths: body.logPaths.filter((path: string) => path.trim()),
+      logFormat: body.logFormat || 'text',
+      enabled: body.enabled ?? true,
       filters: body.filters || ['info', 'warn', 'error'],
       metadata: { ...body.metadata, updatedBy: 'user' }
     };

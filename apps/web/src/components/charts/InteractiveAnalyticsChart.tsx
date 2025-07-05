@@ -58,31 +58,23 @@ export default function InteractiveAnalyticsChart({
   const [selectedTimeRange, setSelectedTimeRange] = useState<string>('24h');
   const [selectedMetric, setSelectedMetric] = useState<string>('count');
 
-  // Process data based on drill-down state and filters
-  const processedData = useMemo(() => {
-    let filtered = data;
+  // Processing functions need to be defined before useMemo
+  const processTimeSeriesData = (data: ChartData[]) => {
+    const grouped = data.reduce((acc, item) => {
+      const key = item.timestamp.split('T')[0]; // Group by date
+      if (!acc[key]) acc[key] = { timestamp: key, count: 0, levels: {} };
+      acc[key].count += item.count;
+      
+      const levelKey = item.level || 'unknown';
+      acc[key].levels[levelKey] = (acc[key].levels[levelKey] || 0) + item.count;
+      
+      return acc;
+    }, {} as Record<string, any>);
 
-    // Apply filters from drill-down state
-    Object.entries(drillDownState.filters).forEach(([key, value]) => {
-      filtered = filtered.filter(item => item[key as keyof ChartData] === value);
-    });
-
-    // Process based on chart type
-    switch (type) {
-      case 'pie':
-        return processPieData(filtered);
-      case 'treemap':
-        return processTreeMapData(filtered);
-      case 'scatter':
-        return processScatterData(filtered);
-      case 'radar':
-        return processRadarData(filtered);
-      case 'heatmap':
-        return processHeatmapData(filtered);
-      default:
-        return processTimeSeriesData(filtered);
-    }
-  }, [data, drillDownState, type]);
+    return Object.values(grouped).sort((a: any, b: any) => 
+      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+  };
 
   const processPieData = (data: ChartData[]) => {
     const grouped = data.reduce((acc, item) => {
@@ -159,22 +151,33 @@ export default function InteractiveAnalyticsChart({
     });
   };
 
-  const processTimeSeriesData = (data: ChartData[]) => {
-    const grouped = data.reduce((acc, item) => {
-      const key = item.timestamp.split('T')[0]; // Group by date
-      if (!acc[key]) acc[key] = { timestamp: key, count: 0, levels: {} };
-      acc[key].count += item.count;
-      
-      const levelKey = item.level || 'unknown';
-      acc[key].levels[levelKey] = (acc[key].levels[levelKey] || 0) + item.count;
-      
-      return acc;
-    }, {} as Record<string, any>);
+  // Process data based on drill-down state and filters
+  const processedData = useMemo(() => {
+    let filtered = data;
 
-    return Object.values(grouped).sort((a: any, b: any) => 
-      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-    );
-  };
+    // Apply filters from drill-down state
+    Object.entries(drillDownState.filters).forEach(([key, value]) => {
+      filtered = filtered.filter(item => item[key as keyof ChartData] === value);
+    });
+
+    // Process based on chart type
+    switch (type) {
+      case 'pie':
+        return processPieData(filtered);
+      case 'treemap':
+        return processTreeMapData(filtered);
+      case 'scatter':
+        return processScatterData(filtered);
+      case 'radar':
+        return processRadarData(filtered);
+      case 'heatmap':
+        return processHeatmapData(filtered);
+      default:
+        return processTimeSeriesData(filtered);
+    }
+  }, [data, drillDownState, type]);
+
+
 
   const handleChartClick = useCallback((data: any) => {
     if (!onDrillDown) return;
