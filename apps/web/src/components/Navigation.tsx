@@ -9,6 +9,7 @@ const navigationItems = [
   { href: '/analytics', label: 'Analytics' },
   { href: '/analytics/enhanced', label: 'Enhanced Analytics' },
   { href: '/agents', label: 'Agent Manager' },
+  { href: '/forwarders', label: 'Forwarders' },
   { href: '/dashboard-builder', label: 'Dashboard Builder' }
 ];
 

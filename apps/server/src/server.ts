@@ -18,6 +18,7 @@ import { LogWatcherService } from './services/log-watcher.service.js';
 import { LogAnalyticsService } from './services/log-analytics.service.js';
 import { EnhancedLogAnalyticsService } from './services/enhanced-log-analytics.service.js';
 import { WebSocketService } from './services/websocket.service.js';
+import { SyslogForwarderService } from './services/syslog-forwarder.service.js';
 import { LogEntrySchema, LogQuerySchema } from '@mcp-log-server/types';
 
 /**
@@ -70,10 +71,14 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
   await webSocketService.initialize();
   logger.info('✅ WebSocket service initialized for real-time updates');
 
+  // Initialize syslog forwarder service
+  const syslogForwarderService = new SyslogForwarderService(logger);
+  logger.info('✅ Syslog forwarder service initialized');
+
   // Initialize log watcher service
   const logWatcherService = new LogWatcherService(logsService);
 
-  // Set up log event handling with WebSocket broadcasting
+  // Set up log event handling with WebSocket broadcasting and syslog forwarding
   logWatcherService.on('log-entry', (logEntry: any) => {
     logger.debug('New log entry captured', {
       agent: logEntry.source,
@@ -83,6 +88,19 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
 
     // Broadcast log entry to WebSocket clients
     webSocketService.broadcastLogEntry(logEntry);
+
+    // Forward log entry to syslog servers
+    syslogForwarderService.forwardLog({
+      timestamp: new Date(logEntry.timestamp || Date.now()),
+      agent: logEntry.source || 'unknown',
+      level: logEntry.level || 'info',
+      message: logEntry.message || '',
+      source: logEntry.source,
+      metadata: logEntry.metadata
+    }).catch(error => {
+      // Don't spam logs, just debug level for forwarding errors
+      logger.debug('Log forwarding failed', { error: error.message });
+    });
   });
 
   // Start watching agent log files
@@ -105,6 +123,7 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
     try {
       await webSocketService.shutdown();
       await logWatcherService.stopWatching();
+      await syslogForwarderService.shutdown();
       logger.info('All services shut down successfully');
     } catch (error) {
       logger.warn('Error shutting down services', { error });
@@ -1394,6 +1413,246 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
     } catch (error) {
       fastify.log.error('Failed to get analytics performance:', error);
       return reply.status(500).send({ error: 'Internal server error' });
+    }
+  });
+
+  // Syslog Forwarder API endpoints
+  
+  // Get all syslog forwarders
+  fastify.get('/api/syslog/forwarders', {
+    schema: {
+      description: 'Get all syslog forwarders',
+      tags: ['Syslog'],
+      response: {
+        200: {
+          type: 'array',
+          items: { type: 'object' }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const forwarders = syslogForwarderService.getForwarders();
+      return reply.send(forwarders);
+    } catch (error) {
+      logger.error('Failed to get syslog forwarders:', error);
+      return reply.status(500).send({ error: 'Failed to get syslog forwarders' });
+    }
+  });
+
+  // Get specific syslog forwarder
+  fastify.get('/api/syslog/forwarders/:id', {
+    schema: {
+      description: 'Get specific syslog forwarder',
+      tags: ['Syslog'],
+      params: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' }
+        },
+        required: ['id']
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      const forwarder = syslogForwarderService.getForwarder(id);
+      
+      if (!forwarder) {
+        return reply.status(404).send({ error: 'Forwarder not found' });
+      }
+      
+      return reply.send(forwarder);
+    } catch (error) {
+      logger.error('Failed to get syslog forwarder:', error);
+      return reply.status(500).send({ error: 'Failed to get syslog forwarder' });
+    }
+  });
+
+  // Create new syslog forwarder
+  fastify.post('/api/syslog/forwarders', {
+    schema: {
+      description: 'Create new syslog forwarder',
+      tags: ['Syslog'],
+      body: {
+        type: 'object',
+        required: ['name', 'host', 'port', 'protocol'],
+        properties: {
+          name: { type: 'string' },
+          host: { type: 'string' },
+          port: { type: 'number', minimum: 1, maximum: 65535 },
+          protocol: { type: 'string', enum: ['udp', 'tcp', 'tcp-tls'] },
+          facility: { type: 'number', minimum: 0, maximum: 23 },
+          severity: { type: 'string', enum: ['emergency', 'alert', 'critical', 'error', 'warning', 'notice', 'info', 'debug'] },
+          format: { type: 'string', enum: ['rfc3164', 'rfc5424'] },
+          enabled: { type: 'boolean' },
+          filters: {
+            type: 'object',
+            properties: {
+              agents: { type: 'array', items: { type: 'string' } },
+              levels: { type: 'array', items: { type: 'string' } },
+              messagePatterns: { type: 'array', items: { type: 'string' } }
+            }
+          },
+          metadata: {
+            type: 'object',
+            properties: {
+              tag: { type: 'string' },
+              hostname: { type: 'string' },
+              appName: { type: 'string' }
+            }
+          }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const forwarderData = request.body as any;
+      
+      // Set defaults
+      const config = {
+        name: forwarderData.name,
+        host: forwarderData.host,
+        port: forwarderData.port,
+        protocol: forwarderData.protocol,
+        facility: forwarderData.facility ?? 16, // local use
+        severity: forwarderData.severity ?? 'info',
+        format: forwarderData.format ?? 'rfc5424',
+        enabled: forwarderData.enabled ?? true,
+        filters: forwarderData.filters,
+        metadata: forwarderData.metadata
+      };
+      
+      const forwarder = await syslogForwarderService.addForwarder(config);
+      return reply.status(201).send(forwarder);
+    } catch (error) {
+      logger.error('Failed to create syslog forwarder:', error);
+      return reply.status(500).send({ 
+        error: 'Failed to create syslog forwarder',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // Update syslog forwarder
+  fastify.put('/api/syslog/forwarders/:id', {
+    schema: {
+      description: 'Update syslog forwarder',
+      tags: ['Syslog'],
+      params: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' }
+        },
+        required: ['id']
+      },
+      body: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          host: { type: 'string' },
+          port: { type: 'number', minimum: 1, maximum: 65535 },
+          protocol: { type: 'string', enum: ['udp', 'tcp', 'tcp-tls'] },
+          facility: { type: 'number', minimum: 0, maximum: 23 },
+          severity: { type: 'string', enum: ['emergency', 'alert', 'critical', 'error', 'warning', 'notice', 'info', 'debug'] },
+          format: { type: 'string', enum: ['rfc3164', 'rfc5424'] },
+          enabled: { type: 'boolean' },
+          filters: {
+            type: 'object',
+            properties: {
+              agents: { type: 'array', items: { type: 'string' } },
+              levels: { type: 'array', items: { type: 'string' } },
+              messagePatterns: { type: 'array', items: { type: 'string' } }
+            }
+          },
+          metadata: {
+            type: 'object',
+            properties: {
+              tag: { type: 'string' },
+              hostname: { type: 'string' },
+              appName: { type: 'string' }
+            }
+          }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      const updates = request.body as any;
+      
+      const forwarder = await syslogForwarderService.updateForwarder(id, updates);
+      
+      if (!forwarder) {
+        return reply.status(404).send({ error: 'Forwarder not found' });
+      }
+      
+      return reply.send(forwarder);
+    } catch (error) {
+      logger.error('Failed to update syslog forwarder:', error);
+      return reply.status(500).send({ 
+        error: 'Failed to update syslog forwarder',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // Delete syslog forwarder
+  fastify.delete('/api/syslog/forwarders/:id', {
+    schema: {
+      description: 'Delete syslog forwarder',
+      tags: ['Syslog'],
+      params: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' }
+        },
+        required: ['id']
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      const success = await syslogForwarderService.removeForwarder(id);
+      
+      if (!success) {
+        return reply.status(404).send({ error: 'Forwarder not found' });
+      }
+      
+      return reply.send({ success: true, message: 'Forwarder deleted successfully' });
+    } catch (error) {
+      logger.error('Failed to delete syslog forwarder:', error);
+      return reply.status(500).send({ error: 'Failed to delete syslog forwarder' });
+    }
+  });
+
+  // Test syslog connection
+  fastify.post('/api/syslog/test-connection', {
+    schema: {
+      description: 'Test syslog server connection',
+      tags: ['Syslog'],
+      body: {
+        type: 'object',
+        required: ['host', 'port', 'protocol'],
+        properties: {
+          host: { type: 'string' },
+          port: { type: 'number', minimum: 1, maximum: 65535 },
+          protocol: { type: 'string', enum: ['udp', 'tcp', 'tcp-tls'] }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    try {
+      const { host, port, protocol } = request.body as { host: string; port: number; protocol: string };
+      
+      const result = await syslogForwarderService.testConnection({ host, port, protocol });
+      return reply.send(result);
+    } catch (error) {
+      logger.error('Failed to test syslog connection:', error);
+      return reply.status(500).send({ 
+        error: 'Failed to test connection',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      });
     }
   });
 
