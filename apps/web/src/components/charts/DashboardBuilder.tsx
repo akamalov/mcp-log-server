@@ -272,26 +272,26 @@ export default function DashboardBuilder({
           <div 
             key={widget.id}
             style={gridStyle}
-            className={`bg-white rounded-lg shadow p-4 relative group ${selectedWidget === widget.id ? 'ring-2 ring-blue-500' : ''}`}
+            className={`bg-white dark:bg-gray-800 rounded-lg shadow p-4 relative group ${selectedWidget === widget.id ? 'ring-2 ring-blue-500' : ''}`}
             onClick={() => setSelectedWidget(widget.id)}
           >
-            <h3 className="text-lg font-semibold mb-4">{widget.title}</h3>
+            <h3 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">{widget.title}</h3>
             <div className="grid grid-cols-2 gap-4">
               <div className="text-center">
                 <p className="text-2xl font-bold text-blue-600">1,247</p>
-                <p className="text-sm text-gray-600">Total Logs</p>
+                <p className="text-sm text-gray-600 dark:text-gray-300">Total Logs</p>
               </div>
               <div className="text-center">
                 <p className="text-2xl font-bold text-green-600">98.5%</p>
-                <p className="text-sm text-gray-600">Uptime</p>
+                <p className="text-sm text-gray-600 dark:text-gray-300">Uptime</p>
               </div>
               <div className="text-center">
                 <p className="text-2xl font-bold text-orange-600">2.1%</p>
-                <p className="text-sm text-gray-600">Error Rate</p>
+                <p className="text-sm text-gray-600 dark:text-gray-300">Error Rate</p>
               </div>
               <div className="text-center">
                 <p className="text-2xl font-bold text-purple-600">3</p>
-                <p className="text-sm text-gray-600">Active Agents</p>
+                <p className="text-sm text-gray-600 dark:text-gray-300">Active Agents</p>
               </div>
             </div>
             {isEditing && (
@@ -320,18 +320,18 @@ export default function DashboardBuilder({
           <div 
             key={widget.id}
             style={gridStyle}
-            className={`bg-white rounded-lg shadow p-4 relative group ${selectedWidget === widget.id ? 'ring-2 ring-blue-500' : ''}`}
+            className={`bg-white dark:bg-gray-800 rounded-lg shadow p-4 relative group ${selectedWidget === widget.id ? 'ring-2 ring-blue-500' : ''}`}
             onClick={() => setSelectedWidget(widget.id)}
           >
-            <h3 className="text-lg font-semibold mb-4">{widget.title}</h3>
+            <h3 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">{widget.title}</h3>
             <div className="space-y-2">
-              <div className="flex items-center gap-2 p-2 bg-red-50 rounded">
+              <div className="flex items-center gap-2 p-2 bg-red-50 dark:bg-red-900/20 rounded">
                 <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-                <span className="text-sm">High error rate detected</span>
+                <span className="text-sm text-gray-700 dark:text-gray-200">High error rate detected</span>
               </div>
-              <div className="flex items-center gap-2 p-2 bg-yellow-50 rounded">
+              <div className="flex items-center gap-2 p-2 bg-yellow-50 dark:bg-yellow-900/20 rounded">
                 <div className="w-2 h-2 bg-yellow-500 rounded-full"></div>
-                <span className="text-sm">Agent response time increased</span>
+                <span className="text-sm text-gray-700 dark:text-gray-200">Agent response time increased</span>
               </div>
             </div>
             {isEditing && (
@@ -360,24 +360,24 @@ export default function DashboardBuilder({
           <div 
             key={widget.id}
             style={gridStyle}
-            className="bg-gray-100 rounded-lg p-4 flex items-center justify-center"
+            className="bg-gray-100 dark:bg-gray-700 rounded-lg p-4 flex items-center justify-center"
           >
-            <p>Unknown widget type: {widget.type}</p>
+            <p className="text-gray-600 dark:text-gray-300">Unknown widget type: {widget.type}</p>
           </div>
         );
     }
   };
 
   return (
-    <div className="bg-gray-50 min-h-screen">
+    <div className="bg-gray-50 dark:bg-gray-900 min-h-screen">
       {/* Header */}
-      <div className="bg-white shadow-sm border-b p-4">
+      <div className="bg-white dark:bg-gray-800 shadow-sm border-b dark:border-gray-700 p-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <Layout className="w-6 h-6 text-blue-600" />
             <div>
-              <h1 className="text-xl font-bold text-gray-900">Dashboard Builder</h1>
-              <p className="text-sm text-gray-600">Create and customize your analytics dashboard</p>
+              <h1 className="text-xl font-bold text-gray-900 dark:text-white">Dashboard Builder</h1>
+              <p className="text-sm text-gray-600 dark:text-gray-300">Create and customize your analytics dashboard</p>
             </div>
           </div>
 
@@ -430,9 +430,9 @@ export default function DashboardBuilder({
       <div className="p-6">
         {dashboard.widgets.length === 0 ? (
           <div className="text-center py-12">
-            <Layout className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-            <h2 className="text-xl font-semibold text-gray-600 mb-2">No widgets yet</h2>
-            <p className="text-gray-500 mb-6">Start building your dashboard by adding widgets</p>
+            <Layout className="w-16 h-16 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
+            <h2 className="text-xl font-semibold text-gray-600 dark:text-gray-300 mb-2">No widgets yet</h2>
+            <p className="text-gray-500 dark:text-gray-400 mb-6">Start building your dashboard by adding widgets</p>
             <button
               onClick={() => setShowWidgetPicker(true)}
               className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 mx-auto"
@@ -457,12 +457,12 @@ export default function DashboardBuilder({
       {/* Widget Picker Modal */}
       {showWidgetPicker && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-4xl w-full m-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-4xl w-full m-4">
             <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-bold">Add Widget</h2>
+              <h2 className="text-xl font-bold text-gray-900 dark:text-white">Add Widget</h2>
               <button
                 onClick={() => setShowWidgetPicker(false)}
-                className="p-2 hover:bg-gray-100 rounded-lg"
+                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -473,16 +473,16 @@ export default function DashboardBuilder({
                 <button
                   key={index}
                   onClick={() => addWidget(template)}
-                  className="p-4 border rounded-lg hover:border-blue-500 hover:bg-blue-50 text-left transition-colors"
+                  className="p-4 border dark:border-gray-600 rounded-lg hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-left transition-colors"
                 >
                   <div className="flex items-center gap-3 mb-2">
                     <template.icon className="w-5 h-5 text-blue-600" />
-                    <h3 className="font-medium">{template.title}</h3>
+                    <h3 className="font-medium text-gray-900 dark:text-white">{template.title}</h3>
                   </div>
-                  <p className="text-sm text-gray-600">
+                  <p className="text-sm text-gray-600 dark:text-gray-300">
                     {template.type === 'chart' ? `${template.chartType} chart` : template.type} widget
                   </p>
-                  <p className="text-xs text-gray-500 mt-1">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                     Size: {template.defaultSize.w}x{template.defaultSize.h}
                   </p>
                 </button>
