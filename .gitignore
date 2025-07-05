@@ -198,6 +198,13 @@ db_data/
 
 # Certificate files
 *.pem
+
+# AI Agent specific configuration files
+.claude/
+.gemini/
+.serena/
+CLAUDE.md
+GEMINI.md
 *.key
 *.crt
 
