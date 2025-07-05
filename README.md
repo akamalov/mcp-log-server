@@ -108,6 +108,36 @@ MCP Log Server is a monitoring and analytics solution that bridges the gap betwe
 - **Search Capabilities**: Elasticsearch-powered log search
 - **Data Export**: Export logs in various formats
 
+## 📸 Screenshots
+
+### Main Dashboard
+The central hub for monitoring all your AI agents with real-time metrics and status overview.
+
+![MCP Log Server Dashboard](https://github.com/user-attachments/assets/27f089ff-97bc-462c-9154-ae03fcf5b832)
+
+*Features: Real-time agent status, system health metrics, log volume tracking, and quick navigation to detailed views.*
+
+### Enhanced Log Viewer
+Advanced log filtering and viewing with regex support for deep log analysis.
+
+![Enhanced Log Viewer](https://github.com/user-attachments/assets/db4ca12b-7b62-4d51-8c5a-7a0e6f8b7b13)
+
+*Features: Real-time log streaming, advanced filtering, search functionality, and export capabilities.*
+
+### Agent Manager
+Comprehensive agent management interface for both auto-discovered and custom agents.
+
+![Agent Manager](https://github.com/user-attachments/assets/3c9e5c8f-40e1-4ef7-be87-9a1f9d4e5c7a)
+
+*Features: Auto-discovery status, custom agent configuration, agent health monitoring, and log path management.*
+
+### Enhanced Analytics
+Advanced analytics dashboard with performance metrics and predictive insights.
+
+![Enhanced Analytics](https://github.com/user-attachments/assets/e7f4d41f-9c5b-4b37-8f7c-8f5e8c7d8c9a)
+
+*Features: Response time distribution, throughput analysis, error tracking, and agent activity patterns.*
+
 ## 🚀 Quick Start Guide
 
 ### Prerequisites
