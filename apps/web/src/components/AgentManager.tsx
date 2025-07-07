@@ -5,19 +5,20 @@ import { Plus, Edit, Trash2, Settings, FolderOpen, X, Save, RefreshCw, AlertCirc
 
 interface CustomAgent {
   id: string;
-  user_id?: string;
   name: string;
   type: string;
-  config: any;
-  is_active: boolean;
-  auto_discovery: boolean;
-  log_paths: string[];
-  format_type: string;
+  enabled: boolean;
+  logPaths: string[];
+  logFormat: string;
   filters: string[];
-  metadata: any;
-  created_at: string;
-  updated_at: string;
-  last_sync_at?: string;
+  isCustom: boolean;
+  metadata: {
+    isCustom: boolean;
+    createdAt: string;
+    createdBy: string;
+    updatedAt: string;
+    updatedBy?: string;
+  };
 }
 
 interface AgentFormData {
@@ -201,9 +202,9 @@ export default function AgentManager() {
     setFormData({
       name: agent.name,
       type: agent.type,
-      logPaths: agent.config?.logPaths || agent.log_paths || [''],
-      logFormat: agent.format_type,
-      enabled: agent.is_active,
+      logPaths: agent.logPaths || [''],
+      logFormat: agent.logFormat,
+      enabled: agent.enabled,
       filters: agent.filters,
       metadata: agent.metadata
     });
@@ -540,10 +541,10 @@ export default function AgentManager() {
                   </div>
                   {showDetails === agent.id && (
                     <div className="mt-4 border-t border-gray-200 dark:border-gray-700 pt-4 text-sm text-gray-600 dark:text-gray-300">
-                       <p><strong>Log Paths:</strong> {agent.log_paths.join(', ')}</p>
-                       <p><strong>Format:</strong> {agent.format_type}</p>
-                       <p><strong>Filters:</strong> {agent.filters.join(', ')}</p>
-                       <p><strong>Last Updated:</strong> {new Date(agent.updated_at).toLocaleString()}</p>
+                       <p><strong>Log Paths:</strong> {agent.logPaths ? agent.logPaths.join(', ') : 'No paths configured'}</p>
+                       <p><strong>Format:</strong> {agent.logFormat || 'Not specified'}</p>
+                       <p><strong>Filters:</strong> {agent.filters ? agent.filters.join(', ') : 'No filters configured'}</p>
+                       <p><strong>Last Updated:</strong> {agent.metadata?.updatedAt ? new Date(agent.metadata.updatedAt).toLocaleString() : 'Never updated'}</p>
                     </div>
                   )}
                 </div>

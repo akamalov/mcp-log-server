@@ -74,25 +74,66 @@ export class LogAnalyticsService {
       endTime
     });
 
-    // Get aggregated data using the proper method
-    const aggregatedData = await this.clickhouse.aggregateLogEntries({
-      startTime,
-      endTime,
-      groupBy: ['level', 'source_id'],
-      interval: 'hour'
-    });
-
-    // Process aggregated data to get logsByLevel and logsByAgent
+    // Get actual log data grouped by level
     const logsByLevel: Record<string, number> = {};
-    const logsByAgent: Record<string, number> = {};
-    const logsByHour: Record<string, number> = {};
+    const levels = ['info', 'warn', 'error', 'debug', 'fatal', 'trace'];
+    
+    for (const level of levels) {
+      const count = await this.clickhouse.getLogCount({
+        startTime,
+        endTime,
+        levels: [level]
+      });
+      if (count > 0) {
+        logsByLevel[level] = count;
+      }
+    }
 
-    // For demonstration, let's use some simple calculations
-    // In a real implementation, you'd process the aggregatedData more thoroughly
-    logsByLevel.info = Math.floor(totalLogs * 0.68);
-    logsByLevel.warn = Math.floor(totalLogs * 0.19);
-    logsByLevel.error = Math.floor(totalLogs * 0.10);
-    logsByLevel.debug = Math.floor(totalLogs * 0.03);
+    // Get logs grouped by agent/source
+    const logsByAgent: Record<string, number> = {};
+    try {
+      // Get recent logs to extract actual source IDs
+      const recentLogs = await this.clickhouse.getRecentLogs(1000);
+      const sourceIds = new Set(recentLogs.map(log => log.source_id));
+      
+      for (const sourceId of sourceIds) {
+        const count = await this.clickhouse.getLogCount({
+          startTime,
+          endTime,
+          sourceIds: [sourceId]
+        });
+        if (count > 0) {
+          // Use a simplified name instead of the full source ID
+          const simpleName = sourceId.includes('-') ? 
+            sourceId.split('-').slice(-1)[0].replace(/\.log$/, '') || sourceId :
+            sourceId;
+          logsByAgent[simpleName] = count;
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to get logs by agent:', error);
+    }
+
+    // Get hourly distribution
+    const logsByHour: Record<string, number> = {};
+    try {
+      const aggregatedData = await this.clickhouse.aggregateLogEntries({
+        startTime,
+        endTime,
+        groupBy: ['time'],
+        interval: 'hour'
+      });
+      
+      for (const entry of aggregatedData) {
+        const hourKey = entry.period_start.toISOString();
+        logsByHour[hourKey] = entry.count;
+      }
+    } catch (error) {
+      console.warn('Failed to get hourly log distribution:', error);
+      // Fallback: create a single entry for current hour
+      const currentHour = new Date().toISOString().slice(0, 14) + '00:00';
+      logsByHour[currentHour] = totalLogs;
+    }
 
     // Calculate metrics
     const errorLogs = (logsByLevel.error || 0) + (logsByLevel.fatal || 0);
@@ -100,10 +141,6 @@ export class LogAnalyticsService {
     
     const timeRangeMinutes = (timeRange.end.getTime() - timeRange.start.getTime()) / (1000 * 60);
     const averageLogsPerMinute = timeRangeMinutes > 0 ? totalLogs / timeRangeMinutes : 0;
-
-    // Generate some sample hourly data
-    const currentHour = new Date().toISOString().slice(0, 14) + '00:00';
-    logsByHour[currentHour] = totalLogs;
 
     return {
       totalLogs,
@@ -127,7 +164,17 @@ export class LogAnalyticsService {
       endTime: new Date()
     });
 
-    return sessionData.map((session: any) => {
+    // Deduplicate sessions by source_id, keeping the one with the most recent activity
+    const uniqueSessions = new Map();
+    for (const session of sessionData) {
+      const sourceId = session.source_id;
+      if (!uniqueSessions.has(sourceId) || 
+          new Date(session.end_time) > new Date(uniqueSessions.get(sourceId).end_time)) {
+        uniqueSessions.set(sourceId, session);
+      }
+    }
+
+    return Array.from(uniqueSessions.values()).map((session: any) => {
       const logVolume24h = session.log_count || 0;
       const errorCount24h = session.error_count || 0;
       const warningCount24h = session.warning_count || 0;

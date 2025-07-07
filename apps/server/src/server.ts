@@ -85,6 +85,15 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
       level: logEntry.level,
       message: logEntry.message.substring(0, 100) + (logEntry.message.length > 100 ? '...' : '')
     });
+    
+    // Ingest the log entry into the database
+    logsService.ingestLog(logEntry).catch(error => {
+      logger.error('Failed to ingest log entry:', {
+        error: error.message,
+        logId: logEntry.id,
+        agent: logEntry.source
+      });
+    });
 
     // Broadcast log entry to WebSocket clients
     webSocketService.broadcastLogEntry(logEntry);
@@ -375,8 +384,15 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
     // Get all custom agents
     fastify.get('/api/agents/custom', async (request, reply) => {
       try {
-        const custom = availableAgents.filter(agent => agent.metadata && agent.metadata.isCustom);
-        reply.send(custom);
+        if (!databaseService) {
+          reply.code(503);
+          return { error: 'Database service not available' };
+        }
+
+        // Get fresh data from database instead of cached availableAgents
+        const customAgentsFromDb = await databaseService.getCustomAgents();
+        const customAgents = customAgentsFromDb.map(databaseService.logSourceToAgentConfig);
+        reply.send(customAgents);
       } catch (error) {
         logger.error('Failed to get custom agents:', error);
         reply.status(500).send({ error: 'Failed to retrieve custom agents' });
@@ -990,6 +1006,8 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
   setInterval(() => {
     enhancedAnalyticsService.getAnalyticsSummary().then(summary => {
       webSocketService.broadcastAnalyticsUpdate(summary);
+      // Also broadcast current agent status
+      webSocketService.broadcastAgentStatus(availableAgents);
       logger.debug('📊 Analytics data broadcasted to WebSocket clients');
     }).catch(error => {
       logger.warn('Failed to broadcast analytics', { error });
