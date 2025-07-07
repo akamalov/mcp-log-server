@@ -84,6 +84,12 @@ export default function AgentManager() {
     filters: ['info', 'warn', 'error']
   });
 
+  useEffect(() => {
+    loadAgents();
+    loadDiscoveredAgents();
+    setMounted(true);
+  }, []);
+
   const loadAgents = async () => {
     try {
       setLoading(true);
@@ -117,11 +123,16 @@ export default function AgentManager() {
   const loadDiscoveredAgents = async () => {
     try {
       const response = await fetch('/api/agents/discovered');
-      if (!response.ok) throw new Error('Failed to load discovered agents');
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ details: 'Could not parse error response.' }));
+        throw new Error(`Failed to load discovered agents: ${response.status} ${response.statusText}. ${errorData.details || ''}`);
+      }
       const data = await response.json();
       setDiscoveredAgents(data);
     } catch (err) {
-      console.warn('Failed to load discovered agents:', err);
+      console.error('Failed to load discovered agents:', err);
+      const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred';
+      setError(`Could not load discovered agents. ${errorMessage}`);
     }
   };
 
@@ -381,15 +392,6 @@ export default function AgentManager() {
     });
     setError(null);
   };
-
-  // Only load agents after component is mounted on client
-  useEffect(() => {
-    setMounted(true);
-    if (typeof window !== 'undefined') {
-      loadAgents();
-      loadDiscoveredAgents();
-    }
-  }, []);
 
   // Don't render anything until mounted on client
   if (!mounted) {

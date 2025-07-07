@@ -86,6 +86,22 @@ main() {
     done
 
     print_header "Step 2: Killing Applications"
+    
+    print_status "Forcefully killing processes by name..."
+    # Kill any lingering 'mcp-log-server' processes
+    mcp_pids=$(ps -ef | grep "[m]cp-log-server" | awk '{print $2}')
+    if [ -n "$mcp_pids" ]; then
+        print_warning "Found lingering mcp-log-server processes. Terminating PIDs: $mcp_pids"
+        kill -9 $mcp_pids 2>/dev/null
+    fi
+    
+    # Kill any lingering 'next' processes (for the frontend)
+    next_pids=$(ps -ef | grep "[n]ext" | awk '{print $2}')
+    if [ -n "$next_pids" ]; then
+        print_warning "Found lingering next processes. Terminating PIDs: $next_pids"
+        kill -9 $next_pids 2>/dev/null
+    fi
+
     for port in "${PORTS_TO_CLEAN[@]}"; do
         kill_processes_on_port "$port"
     done

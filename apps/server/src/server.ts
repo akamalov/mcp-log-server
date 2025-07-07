@@ -399,6 +399,34 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
       }
     });
 
+    // Get all discovered (non-custom) agents
+    fastify.get('/api/agents/discovered', {
+      schema: {
+        description: 'Get all discovered (non-custom) agents',
+        tags: ['Agents'],
+        response: {
+          200: {
+            type: 'array',
+            items: {
+              type: 'object',
+              // Loosening the schema to match the agent structure
+            }
+          }
+        }
+      }
+    }, async (request, reply) => {
+      try {
+        // Correctly filter for agents that are NOT custom agents.
+        // Auto-discovered agents do not have `isCustom: true`.
+        const discovered = availableAgents.filter(agent => !agent.isCustom);
+        return discovered;
+      } catch (error) {
+        logger.error('Failed to get discovered agents', { error });
+        reply.code(500);
+        return { error: 'Failed to retrieve discovered agents' };
+      }
+    });
+
     // Get specific agent details
     fastify.get('/api/agents/:agentId', {
       schema: {
