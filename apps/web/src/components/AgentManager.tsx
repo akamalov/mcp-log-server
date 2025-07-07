@@ -785,10 +785,10 @@ export default function AgentManager() {
               </div>
             ) : (
               <div className="grid gap-4">
-                {agents.map(agent => (
-                  <div key={agent.id} className="bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg p-4">
+                {agents.map((agent) => (
+                  <div key={agent.id} className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md border border-gray-200 dark:border-gray-700">
                     <div className="flex justify-between items-start mb-3">
-                      <div>
+                      <div className="flex-grow">
                         <h3 className="font-medium text-gray-900 dark:text-white">{agent.name}</h3>
                         <p className="text-sm text-gray-500 dark:text-gray-400">
                           {agent.type} • {agent.format_type} • {(agent.config?.logPaths || agent.log_paths || []).length} paths
@@ -868,8 +868,8 @@ export default function AgentManager() {
               </div>
             ) : (
               <div className="grid gap-4">
-                {discoveredAgents.map(agent => (
-                  <div key={agent.id} className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-lg p-4">
+                {discoveredAgents.map((agent) => (
+                  <div key={agent.id} className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 p-4 rounded-lg">
                     <div className="flex justify-between items-start mb-3">
                       <div>
                         <h3 className="font-medium text-gray-900 dark:text-white">{agent.name}</h3>
