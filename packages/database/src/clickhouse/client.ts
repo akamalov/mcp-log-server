@@ -684,8 +684,8 @@ export class ClickHouseLogClient {
       format: 'JSONEachRow',
     });
 
-    const countData = await result.json<{count: number}>();
-    const count = Array.isArray(countData) && countData.length > 0 ? countData[0].count || 0 : 0;
+    const countData = await result.json<{count: string | number}>();
+    const count = Array.isArray(countData) && countData.length > 0 ? Number(countData[0].count) || 0 : 0;
     return count;
   }
 

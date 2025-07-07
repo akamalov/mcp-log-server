@@ -116,14 +116,13 @@ export default function AnalyticsPage() {
 
   const handleWebSocketError = useCallback((error: any) => {
     const wsUrl = getWebSocketUrl('/ws/analytics');
-    console.error('❌ WebSocket error:', {
+    console.warn('⚠️ WebSocket connection failed (using fallback data):', {
       type: error.type,
       target: error.target?.readyState,
       url: wsUrl,
-      readyState: error.target?.readyState,
-      error: error
+      readyState: error.target?.readyState
     });
-    setError(`Real-time connection error: ${error.type || 'Connection failed'} (${wsUrl})`);
+    // Don't set error state for WebSocket failures - analytics still works without real-time updates
   }, []);
 
   // WebSocket connection for real-time updates

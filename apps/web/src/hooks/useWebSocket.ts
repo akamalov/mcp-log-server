@@ -146,20 +146,14 @@ export function useWebSocket(options: UseWebSocketOptions) {
       };
 
       ws.onerror = (error) => {
-        console.error('❌ WebSocket error:', {
-          type: error.type,
-          target: error.target?.readyState,
-          readyState: ws.readyState,
+        console.warn('⚠️ WebSocket connection failed:', {
           url: url,
-          error: error,
-          // Additional debugging information
-          socketState: {
+          state: {
             0: 'CONNECTING',
             1: 'OPEN', 
             2: 'CLOSING',
             3: 'CLOSED'
-          }[ws.readyState],
-          timestamp: new Date().toISOString()
+          }[ws.readyState] || 'UNKNOWN'
         });
         setState(prev => ({ ...prev, isConnecting: false }));
         onError?.(error);
