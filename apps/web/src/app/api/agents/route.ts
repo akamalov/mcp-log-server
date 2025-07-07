@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-
-const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3005';
+import { config } from '@/lib/config';
 
 export async function GET(request: NextRequest) {
   try {
     // Forward request to backend's direct agents API
-    const response = await fetch(`${BACKEND_URL}/api/agents`, {
+    const response = await fetch(`${config.backendUrl}/api/agents`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',

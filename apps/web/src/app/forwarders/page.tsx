@@ -3,6 +3,12 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Settings, Trash2, Wifi, WifiOff, TestTube2, AlertCircle, CheckCircle } from 'lucide-react';
+import { Forwarder } from '@/app/types/forwarder';
+import { useQuery as useQueryTanstack } from '@tanstack/react-query';
+import { AddForwarderDialog } from './AddForwarderDialog';
+import { Button } from '@/components/ui/button';
+import { toast } from '@/components/ui/use-toast';
+import { config } from '@/lib/config';
 
 interface SyslogForwarder {
   id: string;
@@ -34,7 +40,7 @@ interface TestResult {
   latency?: number;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3005';
+const API_BASE = config.backendUrl;
 
 export default function ForwardersPage() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);

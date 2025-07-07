@@ -1,400 +1,202 @@
 #!/bin/bash
 
-# MCP Log Server Development Startup Script
-# This script starts the backend, waits for it to be healthy, then starts the frontend
+# MCP Log Server - Comprehensive Development Startup Script
+# Version: 2.0
+# Description: This script ensures a clean environment by killing existing processes,
+# cleaning logs, and then starting and verifying the backend and frontend services sequentially.
 
-set -e  # Exit on any error
+# --- Configuration ---
+BACKEND_PORT=3001
+FRONTEND_PORT=3000
+MAX_WAIT_TIME=60  # Max time to wait for services in seconds
+HEALTH_CHECK_INTERVAL=2 # Seconds between health checks
+LOG_LINES_TO_SHOW=15 # Number of log lines to show in the final report
 
-# Colors for output
+# --- Colors ---
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-# Configuration
-BACKEND_PORT=3001
-FRONTEND_PORT=3000
-MAX_WAIT_TIME=60  # Maximum time to wait for backend in seconds
-HEALTH_CHECK_INTERVAL=2  # Seconds between health checks
+# --- Helper Functions ---
+print_header() { echo -e "\n${CYAN}--- $1 ---${NC}"; }
+print_status() { echo -e "${BLUE}[$(date '+%H:%M:%S')]${NC} $1"; }
+print_success() { echo -e "${GREEN}[$(date '+%H:%M:%S')] ✅ $1${NC}"; }
+print_error() { echo -e "${RED}[$(date '+%H:%M:%S')] ❌ $1${NC}"; }
+print_warning() { echo -e "${YELLOW}[$(date '+%H:%M:%S')] ⚠️  $1${NC}"; }
 
-# Function to print colored output
-print_status() {
-    echo -e "${BLUE}[$(date '+%H:%M:%S')]${NC} $1"
+# --- Process and Port Management ---
+
+# Function to check if a port is in use by a listening process
+is_port_listening() {
+    lsof -i TCP:$1 -sTCP:LISTEN -t >/dev/null 2>&1
 }
 
-print_success() {
-    echo -e "${GREEN}[$(date '+%H:%M:%S')] ✅ $1${NC}"
-}
-
-print_error() {
-    echo -e "${RED}[$(date '+%H:%M:%S')] ❌ $1${NC}"
-}
-
-print_warning() {
-    echo -e "${YELLOW}[$(date '+%H:%M:%S')] ⚠️  $1${NC}"
-}
-
-# Function to check if a port is in use
-check_port() {
+# Function to kill all processes listening on a given port
+kill_processes_on_port() {
     local port=$1
-    if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
-        return 0  # Port is in use
-    else
-        return 1  # Port is free
-    fi
-}
+    print_status "Checking for processes on port $port..."
+    local pids=$(lsof -t -i TCP:$port -sTCP:LISTEN 2>/dev/null)
 
-# Function to kill process on port
-kill_port() {
-    local port=$1
-    local pids=$(lsof -ti:$port 2>/dev/null || true)
     if [ -n "$pids" ]; then
-        print_warning "Killing existing processes on port $port"
-        echo "$pids" | xargs kill -9 2>/dev/null || true
-        sleep 1
+        local pid_list=$(echo "$pids" | tr '\n' ' ')
+        print_warning "Port $port is in use by PID(s): $pid_list. Terminating."
+        kill -9 $pid_list >/dev/null 2>&1
+        
+        # Wait for the port to be free
+        local wait_start_time=$(date +%s)
+        while is_port_listening "$port"; do
+            local now=$(date +%s)
+            if (( now - wait_start_time > 10 )); then
+                print_error "Failed to free port $port after 10 seconds."
+                exit 1
+            fi
+            sleep 0.5
+        done
+        print_success "Port $port has been successfully cleared."
+    else
+        print_success "Port $port is already clear."
     fi
 }
 
-# Function to wait for backend health
-wait_for_backend() {
-    local elapsed=0
-    print_status "Waiting for backend to become healthy..."
-    
-    while [ $elapsed -lt $MAX_WAIT_TIME ]; do
-        if curl -s http://localhost:$BACKEND_PORT/health >/dev/null 2>&1; then
-            local health_response=$(curl -s http://localhost:$BACKEND_PORT/health)
-            local status=$(echo "$health_response" | grep -o '"status":"[^"]*"' | cut -d'"' -f4)
-            
-            if [ "$status" = "healthy" ]; then
-                print_success "Backend is healthy!"
-                return 0
-            else
-                print_warning "Backend responding but not healthy (status: $status)"
-            fi
+# --- Service Functions ---
+
+cleanup_log_files() {
+    print_header "Step 1: Cleaning Up Log Files"
+    rm -f backend.log frontend.log
+    print_success "Removed old backend.log and frontend.log."
+}
+
+prepare_environment() {
+    print_header "Step 2: Preparing Environment"
+    kill_processes_on_port $FRONTEND_PORT
+    kill_processes_on_port $BACKEND_PORT
+}
+
+start_backend() {
+    print_header "Step 3: Starting Backend Server"
+    pnpm --filter server dev > backend.log 2>&1 &
+    local pid=$!
+    echo $pid > .backend.pid
+    print_status "Backend process started with PID $pid."
+
+    print_status "Waiting for backend to become healthy (up to $MAX_WAIT_TIME seconds)..."
+    local start_time=$(date +%s)
+    while true; do
+        if is_port_listening $BACKEND_PORT && curl -s "http://localhost:$BACKEND_PORT/health" | grep -q '"status":"healthy"'; then
+            print_success "Backend is healthy and responding on port $BACKEND_PORT."
+            return 0
         fi
         
+        local now=$(date +%s)
+        if (( now - start_time > MAX_WAIT_TIME )); then
+            print_error "Backend failed to become healthy within $MAX_WAIT_TIME seconds."
+            return 1
+        fi
         printf "."
         sleep $HEALTH_CHECK_INTERVAL
-        elapsed=$((elapsed + HEALTH_CHECK_INTERVAL))
     done
-    
-    echo ""
-    print_error "Backend failed to become healthy within $MAX_WAIT_TIME seconds"
+}
+
+start_frontend() {
+    print_header "Step 4: Starting Frontend Server"
+
+    local max_retries=3
+    local attempt=1
+    local pid
+
+    while [ $attempt -le $max_retries ]; do
+        print_status "Starting frontend server (Attempt $attempt of $max_retries)..."
+        
+        # Ensure port is clear right before starting
+        kill_processes_on_port $FRONTEND_PORT
+
+        pnpm --filter web dev > frontend.log 2>&1 &
+        pid=$!
+        echo $pid > .frontend.pid
+        print_status "Frontend process started with PID $pid."
+
+        print_status "Waiting for frontend to launch on port $FRONTEND_PORT..."
+        sleep 5 # Give it a few seconds to either succeed or fail
+
+        if is_port_listening $FRONTEND_PORT; then
+            print_success "Frontend is running and listening on port $FRONTEND_PORT."
+            return 0
+        fi
+
+        # If it's not listening, check if it died with EADDRINUSE
+        if grep -q "EADDRINUSE" frontend.log; then
+            print_warning "Frontend failed with EADDRINUSE on attempt $attempt. Retrying in 2 seconds..."
+            attempt=$((attempt + 1))
+            sleep 2
+        else
+            # If it failed for another reason, don't retry
+            print_error "Frontend process (PID $pid) died for a reason other than EADDRINUSE."
+            return 1
+        fi
+    done
+
+    print_error "Frontend failed to start after $max_retries attempts. The EADDRINUSE error is persistent."
     return 1
 }
 
-# Function to check database dependencies
-check_databases() {
-    print_status "Checking database dependencies..."
+report_final_status() {
+    print_header "Step 5: Final Status Report"
+    print_success "🎉 Development environment is ready!"
+    print_status "Backend URL:  http://localhost:$BACKEND_PORT"
+    print_status "Frontend URL: http://localhost:$FRONTEND_PORT"
     
-    # Check if docker-compose services are running
-    if ! docker-compose -f docker-compose.dev.yml ps | grep -q "Up.*healthy"; then
-        print_warning "Some database services may not be running. Starting docker-compose..."
-        docker-compose -f docker-compose.dev.yml up -d
-        
-        print_status "Waiting for databases to be healthy..."
-        local db_wait=0
-        while [ $db_wait -lt 30 ]; do
-            if docker-compose -f docker-compose.dev.yml ps | grep -q "Up.*healthy.*Up.*healthy.*Up.*healthy.*Up.*healthy"; then
-                print_success "All databases are healthy!"
-                break
-            fi
-            printf "."
-            sleep 2
-            db_wait=$((db_wait + 2))
-        done
-        echo ""
-    else
-        print_success "Database services are running"
+    echo -e "\n${CYAN}--- Last $LOG_LINES_TO_SHOW Backend Log Lines ---${NC}"
+    if [ -f backend.log ]; then tail -n $LOG_LINES_TO_SHOW backend.log; else print_warning "backend.log not found."; fi
+    
+    echo -e "\n${CYAN}--- Last $LOG_LINES_TO_SHOW Frontend Log Lines ---${NC}"
+    if [ -f frontend.log ]; then tail -n $LOG_LINES_TO_SHOW frontend.log; else print_warning "frontend.log not found."; fi
+}
+
+# --- Main Execution ---
+main() {
+    cleanup_log_files
+    prepare_environment
+    
+    if ! start_backend; then
+        report_final_status
+        print_error "Halting script due to backend failure."
+        exit 1
     fi
+    
+    if ! start_frontend; then
+        report_final_status
+        print_error "Halting script due to frontend failure."
+        exit 1
+    fi
+
+    report_final_status
 }
 
-# Function to start backend
-start_backend() {
-    print_status "Starting backend server..."
-    
-    # Kill any existing backend process
-    kill_port $BACKEND_PORT
-    
-    # Clean up old log files
-    rm -f backend.log
-    
-    # Start backend in background
-    cd "$(dirname "$0")"  # Ensure we're in the project root
-    pnpm --filter server dev > backend.log 2>&1 &
-    local backend_pid=$!
-    
-    # Store PID for cleanup
-    echo $backend_pid > .backend.pid
-    
-    print_status "Backend started with PID $backend_pid"
-    return 0
-}
-
-# Function to start frontend
-start_frontend() {
-    print_status "Starting frontend server..."
-    
-    # Kill any existing frontend process
-    kill_port $FRONTEND_PORT
-    
-    # Clean up old log files
-    rm -f frontend.log
-    
-    # Start frontend in background
-    pnpm --filter web dev > frontend.log 2>&1 &
-    local frontend_pid=$!
-    
-    # Store PID for cleanup
-    echo $frontend_pid > .frontend.pid
-    
-    print_success "Frontend started with PID $frontend_pid"
-    print_success "Frontend available at: http://localhost:$FRONTEND_PORT"
-}
-
-# Function to cleanup on exit
-cleanup() {
-    print_status "Cleaning up..."
-    
-    # Kill backend if PID file exists
+# --- Cleanup on Exit ---
+cleanup_on_exit() {
+    echo ""
+    print_header "Script finished. Cleaning up background processes..."
     if [ -f .backend.pid ]; then
-        local backend_pid=$(cat .backend.pid)
-        if kill -0 $backend_pid 2>/dev/null; then
-            print_status "Stopping backend (PID: $backend_pid)"
-            kill $backend_pid 2>/dev/null || true
-        fi
+        kill $(cat .backend.pid) >/dev/null 2>&1
         rm -f .backend.pid
     fi
-    
-    # Kill frontend if PID file exists
     if [ -f .frontend.pid ]; then
-        local frontend_pid=$(cat .frontend.pid)
-        if kill -0 $frontend_pid 2>/dev/null; then
-            print_status "Stopping frontend (PID: $frontend_pid)"
-            kill $frontend_pid 2>/dev/null || true
-        fi
+        kill $(cat .frontend.pid) >/dev/null 2>&1
         rm -f .frontend.pid
     fi
-    
-    # Final port cleanup
-    kill_port $BACKEND_PORT
-    kill_port $FRONTEND_PORT
+    print_success "Cleanup complete."
 }
 
-# Function to show logs
-show_logs() {
-    print_status "Recent backend logs:"
-    if [ -f backend.log ]; then
-        tail -10 backend.log | sed 's/^/  /'
-    else
-        echo "  No backend logs found"
-    fi
-    echo ""
-    
-    print_status "Recent frontend logs:"
-    if [ -f frontend.log ]; then
-        tail -10 frontend.log | sed 's/^/  /'
-    else
-        echo "  No frontend logs found"
-    fi
-}
+# Trap SIGINT (Ctrl+C) and EXIT
+trap cleanup_on_exit EXIT
 
-# Function to restart both servers
-restart_servers() {
-    print_status "🔄 Restarting MCP Log Server Development Environment"
-    echo ""
-    
-    # Stop any running servers first
-    print_status "Stopping existing servers..."
-    kill_port $BACKEND_PORT
-    kill_port $FRONTEND_PORT
-    
-    # Clean up PID files and logs
-    rm -f .backend.pid .frontend.pid backend.log frontend.log
-    
-    # Wait a moment for processes to fully terminate
-    sleep 2
-    
-    print_success "Existing servers stopped"
-    echo ""
-    
-    # Now start fresh - reuse the main startup logic
-    # Check and start databases
-    check_databases
-    echo ""
-    
-    # Start backend
-    start_backend
-    echo ""
-    
-    # Wait for backend to be healthy
-    if wait_for_backend; then
-        echo ""
-        
-        # Verify analytics endpoint specifically
-        print_status "Verifying analytics API endpoint..."
-        if curl -s http://localhost:$BACKEND_PORT/api/analytics/summary >/dev/null 2>&1; then
-            print_success "Analytics API endpoint is responding"
-        else
-            print_warning "Analytics API endpoint not responding, but continuing..."
-        fi
-        echo ""
-        
-        # Start frontend
-        start_frontend
-        echo ""
-        
-        print_success "🎉 Development environment restarted successfully!"
-        print_success "Backend:  http://localhost:$BACKEND_PORT"
-        print_success "Frontend: http://localhost:$FRONTEND_PORT"
-        print_success "Health:   http://localhost:$BACKEND_PORT/health"
-        echo ""
-        
-        return 0
-    else
-        print_error "Failed to restart backend. Showing recent logs:"
-        show_logs
-        return 1
-    fi
-}
+# Execute main function
+main
 
-# Main execution
-main() {
-    print_status "🚀 Starting MCP Log Server Development Environment"
-    echo ""
-    
-    # Set up signal handlers for cleanup
-    trap cleanup EXIT INT TERM
-    
-    # Check and start databases
-    check_databases
-    echo ""
-    
-    # Start backend
-    start_backend
-    echo ""
-    
-    # Wait for backend to be healthy
-    if wait_for_backend; then
-        echo ""
-        
-        # Verify analytics endpoint specifically
-        print_status "Verifying analytics API endpoint..."
-        if curl -s http://localhost:$BACKEND_PORT/api/analytics/summary >/dev/null 2>&1; then
-            print_success "Analytics API endpoint is responding"
-        else
-            print_warning "Analytics API endpoint not responding, but continuing..."
-        fi
-        echo ""
-        
-        # Start frontend
-        start_frontend
-        echo ""
-        
-        print_success "🎉 Development environment is ready!"
-        print_success "Backend:  http://localhost:$BACKEND_PORT"
-        print_success "Frontend: http://localhost:$FRONTEND_PORT"
-        print_success "Health:   http://localhost:$BACKEND_PORT/health"
-        echo ""
-        print_status "Press Ctrl+C to stop both servers"
-        echo ""
-        
-        # Wait for user interrupt
-        while true; do
-            sleep 1
-        done
-        
-    else
-        print_error "Failed to start backend. Showing recent logs:"
-        show_logs
-        exit 1
-    fi
-}
-
-# Parse command line arguments
-case "${1:-}" in
-    --help|-h)
-        echo "MCP Log Server Development Startup Script"
-        echo ""
-        echo "Usage: $0 [options]"
-        echo ""
-        echo "Options:"
-        echo "  --help, -h     Show this help message"
-        echo "  --restart, -r  Restart both servers (stop if running, then start fresh)"
-        echo "  --logs         Show recent logs and exit"
-        echo "  --stop         Stop running servers and exit"
-        echo "  --status       Check server status and exit"
-        echo ""
-        echo "This script will:"
-        echo "1. Check and start database dependencies"
-        echo "2. Start the backend server on port $BACKEND_PORT"
-        echo "3. Wait for backend health check to pass"
-        echo "4. Start the frontend server on port $FRONTEND_PORT"
-        echo "5. Keep both servers running until Ctrl+C"
-        exit 0
-        ;;
-    --restart|-r)
-        restart_servers
-        if [ $? -eq 0 ]; then
-            print_status "Press Ctrl+C to stop both servers"
-            echo ""
-            
-            # Set up signal handlers for cleanup
-            trap cleanup EXIT INT TERM
-            
-            # Wait for user interrupt
-            while true; do
-                sleep 1
-            done
-        else
-            exit 1
-        fi
-        ;;
-    --logs)
-        show_logs
-        exit 0
-        ;;
-    --stop)
-        print_status "Stopping all servers..."
-        kill_port $BACKEND_PORT
-        kill_port $FRONTEND_PORT
-        rm -f .backend.pid .frontend.pid backend.log frontend.log
-        print_success "All servers stopped"
-        exit 0
-        ;;
-    --status)
-        print_status "Checking server status..."
-        
-        if check_port $BACKEND_PORT; then
-            if curl -s http://localhost:$BACKEND_PORT/health >/dev/null 2>&1; then
-                print_success "Backend: Running and healthy on port $BACKEND_PORT"
-            else
-                print_warning "Backend: Running on port $BACKEND_PORT but not responding to health checks"
-            fi
-        else
-            print_error "Backend: Not running on port $BACKEND_PORT"
-        fi
-        
-        if check_port $FRONTEND_PORT; then
-            if curl -s http://localhost:$FRONTEND_PORT >/dev/null 2>&1; then
-                print_success "Frontend: Running and responding on port $FRONTEND_PORT"
-            else
-                print_warning "Frontend: Running on port $FRONTEND_PORT but not responding"
-            fi
-        else
-            print_error "Frontend: Not running on port $FRONTEND_PORT"
-        fi
-        
-        exit 0
-        ;;
-    "")
-        # Default action - start servers
-        main
-        ;;
-    *)
-        print_error "Unknown option: $1"
-        echo "Use --help for usage information"
-        exit 1
-        ;;
-esac
+# Keep script alive to manage background processes if needed.
+# The trap on EXIT will handle cleanup when this script is terminated.
+print_status "Services are running in the background. Press Ctrl+C to stop all services and exit."
+wait

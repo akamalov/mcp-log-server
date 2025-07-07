@@ -1,79 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
-
-const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3005';
+import { config } from '@/lib/config';
 
 export async function GET(request: NextRequest) {
   try {
-    // For now, return mock discovered agents for testing
-    // TODO: Connect to actual backend when MCP discovery is fully implemented
-    const mockDiscoveredAgents = [
-      {
-        id: 'claude-desktop-auto',
-        name: 'Claude Desktop',
-        type: 'auto-discovered',
-        logFormat: 'claude-mcp-json',
-        logPaths: [
-          '/mnt/c/Users/akama/AppData/Roaming/Claude/logs/main.log',
-          '/mnt/c/Users/akama/AppData/Roaming/Claude/logs/mcp.log'
-        ],
-        metadata: {
-          lastDiscovered: new Date().toISOString(),
-          source: 'auto-discovery',
-          status: 'active',
-          confidence: 0.95
-        }
-      },
-      {
-        id: 'vscode-auto',
-        name: 'VS Code',
-        type: 'auto-discovered',
-        logFormat: 'vscode-extension',
-        logPaths: [
-          '/mnt/c/Users/akama/AppData/Roaming/Code/logs/20250701T134330/main.log',
-          '/mnt/c/Users/akama/AppData/Roaming/Code/logs/20250701T134330/window1/exthost/exthost.log'
-        ],
-        metadata: {
-          lastDiscovered: new Date(Date.now() - 86400000).toISOString(),
-          source: 'auto-discovery',
-          status: 'active',
-          confidence: 0.95
-        }
-      },
-      {
-        id: 'cursor-auto',
-        name: 'Cursor',
-        type: 'auto-discovered',
-        logFormat: 'mixed',
-        logPaths: [
-          '/mnt/c/Users/akama/AppData/Roaming/Cursor/logs/main.log',
-          '/mnt/c/Users/akama/AppData/Roaming/Cursor/logs/window.log'
-        ],
-        metadata: {
-          lastDiscovered: new Date(Date.now() - 3600000).toISOString(),
-          source: 'auto-discovery',
-          status: 'active',
-          confidence: 0.95
-        }
-      },
-      {
-        id: 'gemini-cli-auto',
-        name: 'Gemini CLI',
-        type: 'auto-discovered',
-        logFormat: 'structured',
-        logPaths: [
-          '/mnt/c/Users/akama/.local/share/gemini-cli/projects/mcp-log-server/session.log',
-          '/mnt/c/Users/akama/.local/share/gemini-cli/debug.log'
-        ],
-        metadata: {
-          lastDiscovered: new Date(Date.now() - 1800000).toISOString(),
-          source: 'auto-discovery',
-          status: 'active',
-          confidence: 0.95
-        }
+    const response = await fetch(`${config.backendUrl}/api/agents/discovered`, {
+      method: 'GET',
+      headers: {
+        // ... existing code ...
       }
-    ];
-    
-    return NextResponse.json(mockDiscoveredAgents);
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to fetch discovered agents');
+    }
+
+    const data = await response.json();
+    return NextResponse.json(data);
   } catch (error) {
     console.error('Error fetching discovered agents:', error);
     return NextResponse.json(

@@ -8,7 +8,6 @@ interface WebSocketClient {
   socket: any;
   subscriptions: Set<string>;
   lastPing: Date;
-  isAlive: boolean;
 }
 
 interface RealtimeMessage {
@@ -27,7 +26,7 @@ export class WebSocketService extends EventEmitter {
   constructor(fastify: FastifyInstance) {
     super();
     this.fastify = fastify;
-    this.setupHeartbeat();
+    // Do NOT start heartbeat here to prevent race conditions
   }
 
   /**
@@ -46,7 +45,6 @@ export class WebSocketService extends EventEmitter {
           socket: connection,
           subscriptions: new Set(['logs']),
           lastPing: new Date(),
-          isAlive: true
         };
 
         this.clients.set(clientId, client);
@@ -84,7 +82,6 @@ export class WebSocketService extends EventEmitter {
         // Handle pong responses for heartbeat
         connection.on('pong', () => {
           if (this.clients.has(clientId)) {
-            this.clients.get(clientId)!.isAlive = true;
             this.clients.get(clientId)!.lastPing = new Date();
           }
         });
@@ -99,7 +96,6 @@ export class WebSocketService extends EventEmitter {
           socket: connection,
           subscriptions: new Set(['analytics', 'health']),
           lastPing: new Date(),
-          isAlive: true
         };
 
         this.clients.set(clientId, client);
@@ -137,7 +133,6 @@ export class WebSocketService extends EventEmitter {
 
         connection.on('pong', () => {
           if (this.clients.has(clientId)) {
-            this.clients.get(clientId)!.isAlive = true;
             this.clients.get(clientId)!.lastPing = new Date();
           }
         });
@@ -174,8 +169,14 @@ export class WebSocketService extends EventEmitter {
         break;
 
       case 'pong':
-        client.isAlive = true;
-        client.lastPing = new Date();
+        const clientToUpdate = this.clients.get(clientId);
+        if (clientToUpdate) {
+          clientToUpdate.lastPing = new Date();
+        }
+        break;
+
+      case 'ping':
+        this.sendToClient(clientId, { type: 'pong', timestamp: new Date().toISOString(), data: 'pong' });
         break;
 
       case 'request-analytics':
@@ -266,7 +267,7 @@ export class WebSocketService extends EventEmitter {
    */
   private sendToClient(clientId: string, message: RealtimeMessage) {
     const client = this.clients.get(clientId);
-    if (!client || !client.isAlive) return;
+    if (!client) return;
 
     try {
       client.socket.send(JSON.stringify(message));
@@ -284,8 +285,6 @@ export class WebSocketService extends EventEmitter {
     let sentCount = 0;
 
     for (const [clientId, client] of this.clients.entries()) {
-      if (!client.isAlive) continue;
-
       const hasSubscription = targetChannels.some(channel => 
         client.subscriptions.has(channel)
       );
@@ -315,18 +314,21 @@ export class WebSocketService extends EventEmitter {
         if (timeSinceLastPing > 60000) { // 60 seconds timeout
           disconnectedClients.push(clientId);
         } else if (timeSinceLastPing > 30000) { // Send ping after 30 seconds
-          try {
-            client.socket.ping();
-            client.isAlive = false; // Will be set back to true on pong
-          } catch (error) {
-            disconnectedClients.push(clientId);
-          }
+          this.sendToClient(clientId, {
+            type: 'ping',
+            timestamp: new Date().toISOString(),
+            data: 'server-ping'
+          });
         }
       }
 
       // Clean up disconnected clients
       disconnectedClients.forEach(clientId => {
         console.log(`🧹 Cleaning up disconnected client: ${clientId}`);
+        const client = this.clients.get(clientId);
+        if (client) {
+          client.socket.terminate(); // Properly terminate the connection
+        }
         this.clients.delete(clientId);
       });
 
@@ -334,6 +336,15 @@ export class WebSocketService extends EventEmitter {
         console.log(`❤️  WebSocket heartbeat: ${this.clients.size} active clients`);
       }
     }, 30000); // Check every 30 seconds
+  }
+
+  /**
+   * Starts the heartbeat mechanism. Should be called after all services are initialized.
+   */
+  startHeartbeat() {
+    this.fastify.log.info("Starting WebSocket heartbeat...");
+    this.setupHeartbeat();
+    this.fastify.log.info("WebSocket heartbeat started.");
   }
 
   /**

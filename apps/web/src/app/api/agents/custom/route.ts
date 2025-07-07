@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-
-const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3005';
+import { config } from '@/lib/config';
 
 export async function GET(request: NextRequest) {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
 
-    const response = await fetch(`${BACKEND_URL}/api/agents/custom`, {
+  try {
+    const response = await fetch(`${config.backendUrl}/api/agents/custom`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -60,7 +59,7 @@ export async function POST(request: NextRequest) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
 
-    const response = await fetch(`${BACKEND_URL}/api/agents/custom`, {
+    const response = await fetch(`${config.backendUrl}/api/agents/custom`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

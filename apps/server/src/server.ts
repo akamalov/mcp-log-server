@@ -1751,5 +1751,8 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
     }
   });
 
+  // Start the WebSocket heartbeat only after all services and routes are initialized
+  webSocketService.startHeartbeat();
+
   return fastify;
 } 

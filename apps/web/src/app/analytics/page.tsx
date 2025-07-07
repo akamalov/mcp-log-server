@@ -127,10 +127,10 @@ export default function AnalyticsPage() {
 
   // Determine WebSocket URL dynamically
   const getWebSocketUrl = () => {
-    if (typeof window === 'undefined') return 'ws://localhost:3005/ws/analytics';
+    if (typeof window === 'undefined') return 'ws://localhost:3001/ws/analytics';
     
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.hostname === 'localhost' ? 'localhost:3005' : window.location.host;
+    const host = window.location.hostname === 'localhost' ? 'localhost:3001' : window.location.host;
     return `${protocol}//${host}/ws/analytics`;
   };
 
@@ -142,7 +142,7 @@ export default function AnalyticsPage() {
     onDisconnect: handleWebSocketDisconnect,
     onError: handleWebSocketError,
     autoReconnect: true,
-    maxReconnectAttempts: 3,
+    maxReconnectAttempts: 10,
     reconnectInterval: 5000
   });
 
@@ -151,11 +151,11 @@ export default function AnalyticsPage() {
     let pollInterval: NodeJS.Timeout;
     
     // If WebSocket is not connected and not attempting to connect, start polling
-    if (!webSocket.isConnected && !webSocket.isConnecting && webSocket.reconnectAttempts >= 3) {
+    if (!webSocket.isConnected && !webSocket.isConnecting && webSocket.reconnectAttempts >= 10) {
       console.log('🔄 WebSocket failed, falling back to polling');
       pollInterval = setInterval(async () => {
         try {
-          const response = await fetch('http://localhost:3005/api/analytics/summary');
+          const response = await fetch('http://localhost:3001/api/analytics/summary');
           if (response.ok) {
             const data = await response.json();
             setAnalyticsData(data);
@@ -178,7 +178,7 @@ export default function AnalyticsPage() {
   useEffect(() => {
     async function checkBackendHealth() {
       try {
-        const healthResponse = await fetch('http://localhost:3005/health');
+        const healthResponse = await fetch('http://localhost:3001/health');
         if (!healthResponse.ok) {
           throw new Error(`Health check failed: ${healthResponse.status}`);
         }
@@ -200,7 +200,7 @@ export default function AnalyticsPage() {
       await checkBackendHealth();
       
       try {
-        const response = await fetch('http://localhost:3005/api/analytics/summary');
+        const response = await fetch('http://localhost:3001/api/analytics/summary');
         if (!response.ok) {
           throw new Error(`API returned ${response.status}`);
         }

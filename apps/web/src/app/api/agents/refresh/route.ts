@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-
-const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3005';
+import { config } from '@/lib/config';
 
 export async function POST(request: NextRequest) {
   try {
+    const response = await fetch(`${config.backendUrl}/api/agents/refresh`, {
+      method: 'POST',
+    });
     // For now, return success response since agent refresh isn't implemented in backend yet
     // TODO: Connect to actual backend endpoint when implemented
     // This would typically trigger:

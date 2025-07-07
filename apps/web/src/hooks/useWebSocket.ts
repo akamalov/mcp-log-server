@@ -16,6 +16,7 @@ interface UseWebSocketOptions {
   onConnect?: () => void;
   onDisconnect?: () => void;
   onError?: (error: Event) => void;
+  heartbeatInterval?: number;
 }
 
 interface WebSocketState {
@@ -35,7 +36,8 @@ export function useWebSocket(options: UseWebSocketOptions) {
     onMessage,
     onConnect,
     onDisconnect,
-    onError
+    onError,
+    heartbeatInterval = 30000
   } = options;
 
   const [state, setState] = useState<WebSocketState>({
@@ -48,8 +50,18 @@ export function useWebSocket(options: UseWebSocketOptions) {
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const mountedRef = useRef(false);
+
+  const send = useCallback((message: any) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify(message));
+      return true;
+    }
+    console.warn('⚠️ WebSocket not connected, cannot send message:', message);
+    return false;
+  }, []);
 
   const connect = useCallback(() => {
     // Only connect on client side
@@ -93,6 +105,13 @@ export function useWebSocket(options: UseWebSocketOptions) {
         try {
           const message: RealtimeMessage = JSON.parse(event.data);
           console.log('📡 WebSocket message received:', message.type);
+
+          // Respond to server pings with a pong
+          if (message.type === 'ping') {
+            send({ type: 'pong', timestamp: new Date().toISOString() });
+            return;
+          }
+
           setState(prev => ({ ...prev, lastMessage: message }));
           onMessage?.(message);
         } catch (error) {
@@ -154,12 +173,17 @@ export function useWebSocket(options: UseWebSocketOptions) {
       });
       setState(prev => ({ ...prev, isConnecting: false }));
     }
-  }, [url, autoReconnect, maxReconnectAttempts, reconnectInterval, onMessage, onConnect, onDisconnect, onError]);
+  }, [url, autoReconnect, maxReconnectAttempts, reconnectInterval, onMessage, onConnect, onDisconnect, onError, send]);
 
   const disconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
+    }
+
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+      heartbeatIntervalRef.current = null;
     }
 
     if (wsRef.current) {
@@ -177,14 +201,17 @@ export function useWebSocket(options: UseWebSocketOptions) {
     });
   }, []);
 
-  const send = useCallback((message: any) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify(message));
-      return true;
+  // Setup heartbeat to keep connection alive
+  const setupHeartbeat = () => {
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
     }
-    console.warn('⚠️ WebSocket not connected, cannot send message:', message);
-    return false;
-  }, []);
+    heartbeatIntervalRef.current = setInterval(() => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        send({ type: 'ping', timestamp: new Date().toISOString() });
+      }
+    }, heartbeatInterval);
+  };
 
   useEffect(() => {
     mountedRef.current = true;
@@ -192,13 +219,14 @@ export function useWebSocket(options: UseWebSocketOptions) {
     // Only connect on client side after component mounts
     if (typeof window !== 'undefined') {
       connect();
+      setupHeartbeat();
     }
 
     return () => {
       mountedRef.current = false;
       disconnect();
     };
-  }, [url]);
+  }, [url, connect, disconnect]);
 
   return {
     isConnected: state.isConnected,

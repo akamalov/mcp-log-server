@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Frontend Test</title>
+    <style>
+        body { font-family: monospace; background-color: #121212; color: #E0E0E0; padding: 1em; }
+        #log { border: 1px solid #444; padding: 1em; height: 80vh; overflow-y: scroll; }
+        .log-entry { margin-bottom: 0.5em; }
+        .success { color: #4CAF50; }
+        .error { color: #F44336; }
+        .info { color: #2196F3; }
+        .direction { font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h1>WebSocket Frontend Test</h1>
+    <div id="status">Connecting...</div>
+    <div id="log"></div>
+
+    <script>
+        const logContainer = document.getElementById('log');
+        const statusContainer = document.getElementById('status');
+        const WEBSOCKET_URL = 'ws://localhost:3001/ws/analytics';
+
+        let ws;
+        let heartbeatInterval;
+        let messageCounter = 0;
+
+        function log(message, type = 'info', direction = '') {
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            const timestamp = new Date().toLocaleTimeString();
+            entry.innerHTML = `[${timestamp}] ${direction ? `<span class="direction">${direction}</span> ` : ''}${message}`;
+            logContainer.appendChild(entry);
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+
+        function connect() {
+            log(`Attempting to connect to: ${WEBSOCKET_URL}`, 'info');
+            ws = new WebSocket(WEBSOCKET_URL);
+
+            ws.onopen = function(event) {
+                log('WebSocket connection established.', 'success');
+                statusContainer.textContent = 'Connection: OPEN';
+                statusContainer.className = 'success';
+
+                // Send a ping every 30 seconds
+                heartbeatInterval = setInterval(() => {
+                    if (ws.readyState === WebSocket.OPEN) {
+                        const pingMessage = JSON.stringify({ type: 'ping', timestamp: new Date().toISOString() });
+                        log(`Sending ping: ${pingMessage}`, 'info', 'CLIENT -> SERVER');
+                        ws.send(pingMessage);
+                    }
+                }, 30000);
+            };
+
+            ws.onmessage = function(event) {
+                messageCounter++;
+                log(`Message received (#${messageCounter}): ${event.data}`, 'info', 'SERVER -> CLIENT');
+
+                const message = JSON.parse(event.data);
+                if (message.type === 'ping') {
+                     const pongMessage = JSON.stringify({ type: 'pong', timestamp: new Date().toISOString(), data: 'pong from frontend test' });
+                    log(`Responding with pong: ${pongMessage}`, 'info', 'CLIENT -> SERVER');
+                    ws.send(pongMessage);
+                }
+            };
+
+            ws.onclose = function(event) {
+                log(`WebSocket connection closed. Code: ${event.code}, Reason: ${event.reason || 'No reason provided'}`, 'error');
+                statusContainer.textContent = `Connection: CLOSED (Code: ${event.code})`;
+                statusContainer.className = 'error';
+                clearInterval(heartbeatInterval);
+
+                // Attempt to reconnect after 5 seconds
+                log('Will attempt to reconnect in 5 seconds...', 'info');
+                setTimeout(connect, 5000);
+            };
+
+            ws.onerror = function(event) {
+                log('An error occurred with the WebSocket connection.', 'error');
+                console.error('WebSocket Error:', event);
+                statusContainer.textContent = 'Connection: ERROR';
+                statusContainer.className = 'error';
+                // onclose will be called next, which will handle reconnection.
+            };
+        }
+
+        // Initial connection
+        connect();
+    </script>
+</body>
+</html> 

@@ -2,6 +2,8 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
 import { Download, Loader2 } from 'lucide-react';
+import { Button } from "@/components/ui/button";
+import { config } from '@/lib/config';
 
 interface ExportOptions {
   format: 'csv' | 'json' | 'pdf' | 'excel';
@@ -47,7 +49,7 @@ export default function DataExport() {
 
   // Fetch available agents on component mount
   useEffect(() => {
-    fetch('http://localhost:3005/api/agents')
+    fetch(`${config.backendUrl}/api/agents`)
       .then(res => res.json())
       .then(data => setAvailableAgents(data.agents?.map((a: any) => a.id) || []))
       .catch(console.error);
@@ -92,7 +94,7 @@ export default function DataExport() {
   }, [options]);
 
   const fetchExportData = async (options: ExportOptions): Promise<any> => {
-    const baseUrl = 'http://localhost:3005/api';
+    const baseUrl = config.backendUrl;
     const params = new URLSearchParams({
       start: options.timeRange.start.toISOString(),
       end: options.timeRange.end.toISOString()

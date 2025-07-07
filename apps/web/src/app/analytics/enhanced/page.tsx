@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { config } from '@/lib/config';
 import { 
   LineChart, Line, AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   ScatterChart, Scatter, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar,
@@ -55,14 +57,14 @@ export default function EnhancedAnalyticsPage() {
       setError(null);
       
       try {
-        // Check if backend is running first
-        const healthResponse = await fetch('http://localhost:3005/health');
+        // First, check the health of the backend
+        const healthResponse = await fetch(`${config.backendUrl}/health`);
         if (!healthResponse.ok) {
-          throw new Error('Backend server is not running');
+          throw new Error('Backend is not healthy');
         }
 
         // Try to fetch enhanced analytics (this endpoint may not exist yet)
-        const response = await fetch(`http://localhost:3005/api/analytics/enhanced?timeRange=${selectedTimeRange}`);
+        const response = await fetch(`${config.backendUrl}/api/analytics/enhanced?timeRange=${selectedTimeRange}`);
         
         if (!response.ok) {
           // If enhanced endpoint doesn't exist, generate mock data

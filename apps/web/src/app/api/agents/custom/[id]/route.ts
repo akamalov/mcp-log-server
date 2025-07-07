@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-
-const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3005';
+import { config } from '@/lib/config';
 
 export async function PUT(
   request: NextRequest,
@@ -32,7 +31,7 @@ export async function PUT(
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
 
-    const response = await fetch(`${BACKEND_URL}/api/agents/custom/${id}`, {
+    const response = await fetch(`${config.backendUrl}/api/agents/custom/${id}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -73,8 +72,8 @@ export async function DELETE(
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
 
-    console.log('Sending DELETE request to backend:', `${BACKEND_URL}/api/agents/custom/${id}`);
-    const response = await fetch(`${BACKEND_URL}/api/agents/custom/${id}`, {
+    console.log('Sending DELETE request to backend:', `${config.backendUrl}/api/agents/custom/${id}`);
+    const response = await fetch(`${config.backendUrl}/api/agents/custom/${id}`, {
       method: 'DELETE',
       signal: controller.signal,
     });
