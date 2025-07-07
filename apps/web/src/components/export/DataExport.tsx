@@ -47,7 +47,7 @@ export default function DataExport() {
 
   // Fetch available agents on component mount
   useEffect(() => {
-    fetch('http://localhost:3001/api/agents')
+    fetch('http://localhost:3005/api/agents')
       .then(res => res.json())
       .then(data => setAvailableAgents(data.agents?.map((a: any) => a.id) || []))
       .catch(console.error);
@@ -92,7 +92,7 @@ export default function DataExport() {
   }, [options]);
 
   const fetchExportData = async (options: ExportOptions): Promise<any> => {
-    const baseUrl = 'http://localhost:3001/api';
+    const baseUrl = 'http://localhost:3005/api';
     const params = new URLSearchParams({
       start: options.timeRange.start.toISOString(),
       end: options.timeRange.end.toISOString()
@@ -241,10 +241,10 @@ export default function DataExport() {
   };
 
   return (
-    <div className="bg-white p-6 rounded-lg shadow-lg">
+    <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-lg">
       <div className="flex items-center gap-2 mb-6">
-        <Download className="w-5 h-5 text-blue-600" />
-        <h2 className="text-xl font-semibold">Export Data</h2>
+        <Download className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+        <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Export Data</h2>
       </div>
       
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -252,11 +252,11 @@ export default function DataExport() {
         <div className="space-y-4">
           {/* Data Type */}
           <div>
-            <label className="block text-sm font-medium mb-2">Data Type</label>
+            <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Data Type</label>
             <select 
               value={options.dataType} 
               onChange={(e) => setOptions(prev => ({ ...prev, dataType: e.target.value as any }))}
-              className="w-full p-2 border rounded-lg"
+              className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
             >
               <option value="logs">Logs</option>
               <option value="analytics">Analytics Summary</option>
@@ -268,7 +268,7 @@ export default function DataExport() {
 
           {/* Format */}
           <div>
-            <label className="block text-sm font-medium mb-2">Format</label>
+            <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Format</label>
             <div className="grid grid-cols-2 gap-2">
               {(['csv', 'json', 'pdf', 'excel'] as const).map((format) => (
                 <button
@@ -277,7 +277,7 @@ export default function DataExport() {
                   className={`p-2 rounded-lg border text-sm font-medium transition-colors ${
                     options.format === format
                       ? 'bg-blue-600 text-white border-blue-600'
-                      : 'bg-gray-50 text-gray-700 border-gray-300 hover:bg-gray-100'
+                      : 'bg-gray-50 dark:bg-gray-700 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-600'
                   }`}
                 >
                   {format.toUpperCase()}
@@ -288,10 +288,10 @@ export default function DataExport() {
 
           {/* Time Range */}
           <div>
-            <label className="block text-sm font-medium mb-2">Time Range</label>
+            <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Time Range</label>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="block text-xs text-gray-600 mb-1">Start</label>
+                <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">Start</label>
                 <input
                   type="datetime-local"
                   value={options.timeRange.start.toISOString().slice(0, 16)}
@@ -299,11 +299,11 @@ export default function DataExport() {
                     ...prev,
                     timeRange: { ...prev.timeRange, start: new Date(e.target.value) }
                   }))}
-                  className="w-full p-2 border rounded text-sm"
+                  className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 />
               </div>
               <div>
-                <label className="block text-xs text-gray-600 mb-1">End</label>
+                <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">End</label>
                 <input
                   type="datetime-local"
                   value={options.timeRange.end.toISOString().slice(0, 16)}
@@ -311,7 +311,7 @@ export default function DataExport() {
                     ...prev,
                     timeRange: { ...prev.timeRange, end: new Date(e.target.value) }
                   }))}
-                  className="w-full p-2 border rounded text-sm"
+                  className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 />
               </div>
             </div>
@@ -340,19 +340,19 @@ export default function DataExport() {
         {/* Progress */}
         <div className="space-y-4">
           {exportProgress.isExporting && (
-            <div className="bg-blue-50 p-4 rounded-lg">
+            <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
               <div className="flex items-center gap-2 mb-2">
-                <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
-                <span className="text-sm font-medium text-blue-800">Exporting...</span>
+                <Loader2 className="w-4 h-4 animate-spin text-blue-600 dark:text-blue-400" />
+                <span className="text-sm font-medium text-blue-800 dark:text-blue-300">Exporting...</span>
               </div>
-              <div className="text-sm text-blue-700 mb-2">{exportProgress.stage}</div>
-              <div className="w-full bg-blue-200 rounded-full h-2">
+              <div className="text-sm text-blue-700 dark:text-blue-300 mb-2">{exportProgress.stage}</div>
+              <div className="w-full bg-blue-200 dark:bg-blue-800 rounded-full h-2">
                 <div 
-                  className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                  className="bg-blue-600 dark:bg-blue-400 h-2 rounded-full transition-all duration-300"
                   style={{ width: `${exportProgress.progress}%` }}
                 />
               </div>
-              <div className="text-xs text-blue-600 mt-1 text-right">
+              <div className="text-xs text-blue-600 dark:text-blue-400 mt-1 text-right">
                 {exportProgress.progress}%
               </div>
             </div>

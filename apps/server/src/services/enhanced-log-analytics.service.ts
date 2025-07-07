@@ -87,20 +87,17 @@ export class EnhancedLogAnalyticsService extends LogAnalyticsService {
    * Enhanced pattern detection with regex and clustering
    */
   async detectEnhancedPatterns(timeRange: { start: Date; end: Date }): Promise<EnhancedLogPattern[]> {
-    const startTime = timeRange.start.toISOString();
-    const endTime = timeRange.end.toISOString();
+    const startTime = this.formatTimestamp(timeRange.start);
+    const endTime = this.formatTimestamp(timeRange.end);
 
-    // Get all logs for analysis
-    const logsResult = await this.clickhouse.query({
-      query: `
-        SELECT message, level, source, agentType, timestamp, sessionId
-        FROM mcp_logs.logs
-        WHERE timestamp >= '${startTime}' AND timestamp <= '${endTime}'
-        ORDER BY timestamp ASC
-      `,
+    // Get all logs for analysis using the proper ClickHouse client method
+    const logs = await this.clickhouse.getLogEntries({
+      startTime: timeRange.start,
+      endTime: timeRange.end,
+      limit: 10000, // Limit for performance
+      sortBy: 'timestamp',
+      sortOrder: 'ASC'
     });
-
-    const logs = await logsResult.json();
     
     // 1. Enhanced regex-based pattern extraction
     const regexPatterns = await this.extractEnhancedRegexPatterns(logs);
@@ -310,19 +307,17 @@ export class EnhancedLogAnalyticsService extends LogAnalyticsService {
    * Detect sequence patterns across logs
    */
   async detectSequencePatterns(timeRange: { start: Date; end: Date }): Promise<SequencePattern[]> {
-    const startTime = timeRange.start.toISOString();
-    const endTime = timeRange.end.toISOString();
+    const startTime = this.formatTimestamp(timeRange.start);
+    const endTime = this.formatTimestamp(timeRange.end);
 
-    const logsResult = await this.clickhouse.query({
-      query: `
-        SELECT message, level, source, agentType, timestamp, sessionId
-        FROM mcp_logs.logs
-        WHERE timestamp >= '${startTime}' AND timestamp <= '${endTime}'
-        ORDER BY timestamp ASC
-      `,
+    // Use the proper ClickHouse client method
+    const logs = await this.clickhouse.getLogEntries({
+      startTime: timeRange.start,
+      endTime: timeRange.end,
+      limit: 10000,
+      sortBy: 'timestamp',
+      sortOrder: 'ASC'
     });
-
-    const logs = await logsResult.json();
     
     // Group logs by session/agent
     const sessionGroups = this.groupLogsBySession(logs);
@@ -864,14 +859,10 @@ export class EnhancedLogAnalyticsService extends LogAnalyticsService {
   }
 
   private async getLogCount(start: Date, end: Date): Promise<number> {
-    const result = await this.clickhouse.query({
-      query: `
-        SELECT count() as total
-        FROM mcp_logs.logs 
-        WHERE timestamp >= '${start.toISOString()}' AND timestamp <= '${end.toISOString()}'
-      `,
+    return await this.clickhouse.getLogCount({
+      startTime: start,
+      endTime: end
     });
-    return Number((await result.json())[0]?.total || 0);
   }
 
   private async getHistoricalVolumes(days: number): Promise<number[]> {

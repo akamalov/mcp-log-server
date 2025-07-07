@@ -127,10 +127,10 @@ export default function AnalyticsPage() {
 
   // Determine WebSocket URL dynamically
   const getWebSocketUrl = () => {
-    if (typeof window === 'undefined') return 'ws://localhost:3001/ws/analytics';
+    if (typeof window === 'undefined') return 'ws://localhost:3005/ws/analytics';
     
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.hostname === 'localhost' ? 'localhost:3001' : window.location.host;
+    const host = window.location.hostname === 'localhost' ? 'localhost:3005' : window.location.host;
     return `${protocol}//${host}/ws/analytics`;
   };
 
@@ -155,7 +155,7 @@ export default function AnalyticsPage() {
       console.log('🔄 WebSocket failed, falling back to polling');
       pollInterval = setInterval(async () => {
         try {
-          const response = await fetch('http://localhost:3001/api/analytics/summary');
+          const response = await fetch('http://localhost:3005/api/analytics/summary');
           if (response.ok) {
             const data = await response.json();
             setAnalyticsData(data);
@@ -178,7 +178,7 @@ export default function AnalyticsPage() {
   useEffect(() => {
     async function checkBackendHealth() {
       try {
-        const healthResponse = await fetch('http://localhost:3001/health');
+        const healthResponse = await fetch('http://localhost:3005/health');
         if (!healthResponse.ok) {
           throw new Error(`Health check failed: ${healthResponse.status}`);
         }
@@ -200,7 +200,7 @@ export default function AnalyticsPage() {
       await checkBackendHealth();
       
       try {
-        const response = await fetch('http://localhost:3001/api/analytics/summary');
+        const response = await fetch('http://localhost:3005/api/analytics/summary');
         if (!response.ok) {
           throw new Error(`API returned ${response.status}`);
         }
@@ -229,17 +229,17 @@ export default function AnalyticsPage() {
 
   if (loading) {
     return (
-      <div className="p-6">
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-8">
         <div className="animate-pulse">
-          <div className="h-8 bg-gray-200 rounded w-1/4 mb-6"></div>
+          <div className="h-8 bg-gray-200 dark:bg-gray-700 rounded w-1/4 mb-6"></div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
             {[1, 2, 3].map((i) => (
-              <div key={i} className="bg-gray-200 h-32 rounded"></div>
+              <div key={i} className="bg-gray-200 dark:bg-gray-700 h-32 rounded"></div>
             ))}
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="bg-gray-200 h-64 rounded"></div>
+              <div key={i} className="bg-gray-200 dark:bg-gray-700 h-64 rounded"></div>
             ))}
           </div>
         </div>
@@ -249,10 +249,10 @@ export default function AnalyticsPage() {
 
   if (error && !analyticsData) {
     return (
-      <div className="p-6">
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <h3 className="text-red-800 font-medium">Error Loading Analytics</h3>
-          <p className="text-red-600 mt-1">{error}</p>
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-8">
+        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
+          <h3 className="text-red-800 dark:text-red-200 font-medium">Error Loading Analytics</h3>
+          <p className="text-red-600 dark:text-red-300 mt-1">{error}</p>
           <button 
             onClick={() => window.location.reload()}
             className="mt-3 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
@@ -283,13 +283,13 @@ export default function AnalyticsPage() {
   })) : [];
 
   return (
-    <div className="p-6 space-y-6">
-      {/* Header with Real-time Status */}
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Analytics Dashboard</h1>
-          <p className="text-gray-600 mt-1">Real-time log analysis and insights</p>
-        </div>
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-8">
+      <header className="mb-8">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Analytics Dashboard</h1>
+            <p className="text-gray-600 dark:text-gray-300 mt-2">Real-time log analysis and insights</p>
+          </div>
         
         <div className="flex items-center space-x-4">
           {/* Real-time Status Indicator */}
@@ -311,22 +311,23 @@ export default function AnalyticsPage() {
             </div>
           )}
           
-          <div className="text-sm text-gray-500">
-            Last updated: {lastUpdate.toLocaleTimeString()}
+            <div className="text-sm text-gray-500 dark:text-gray-400">
+              Last updated: {lastUpdate.toLocaleTimeString()}
+            </div>
           </div>
         </div>
-      </div>
+      </header>
 
       {/* Error Banner */}
       {error && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-          <p className="text-yellow-800">{error}</p>
+        <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4 mb-6">
+          <p className="text-yellow-800 dark:text-yellow-200">{error}</p>
         </div>
       )}
 
       {/* Real-time Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <div className="bg-white rounded-lg shadow p-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
           <div className="flex items-center">
             <div className="flex-shrink-0">
               <div className="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center">
@@ -334,15 +335,15 @@ export default function AnalyticsPage() {
               </div>
             </div>
             <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">Total Logs</p>
-              <p className="text-2xl font-bold text-gray-900">
+              <p className="text-sm font-medium text-gray-600 dark:text-gray-300">Total Logs</p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white">
                 {analyticsData?.metrics.totalLogs.toLocaleString() || '0'}
               </p>
             </div>
           </div>
         </div>
 
-        <div className="bg-white rounded-lg shadow p-6">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
           <div className="flex items-center">
             <div className="flex-shrink-0">
               <div className="w-8 h-8 bg-green-500 rounded-lg flex items-center justify-center">
@@ -350,13 +351,13 @@ export default function AnalyticsPage() {
               </div>
             </div>
             <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">Active Agents</p>
-              <p className="text-2xl font-bold text-gray-900">{realtimeStats.activeAgents}</p>
+              <p className="text-sm font-medium text-gray-600 dark:text-gray-300">Active Agents</p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white">{realtimeStats.activeAgents}</p>
             </div>
           </div>
         </div>
 
-        <div className="bg-white rounded-lg shadow p-6">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
           <div className="flex items-center">
             <div className="flex-shrink-0">
               <div className="w-8 h-8 bg-red-500 rounded-lg flex items-center justify-center">
@@ -364,15 +365,15 @@ export default function AnalyticsPage() {
               </div>
             </div>
             <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">Error Rate</p>
-              <p className="text-2xl font-bold text-gray-900">
+              <p className="text-sm font-medium text-gray-600 dark:text-gray-300">Error Rate</p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white">
                 {((analyticsData?.metrics.errorRate || 0) * 100).toFixed(1)}%
               </p>
             </div>
           </div>
         </div>
 
-        <div className="bg-white rounded-lg shadow p-6">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
           <div className="flex items-center">
             <div className="flex-shrink-0">
               <div className="w-8 h-8 bg-purple-500 rounded-lg flex items-center justify-center">
@@ -380,8 +381,8 @@ export default function AnalyticsPage() {
               </div>
             </div>
             <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">Logs/Min</p>
-              <p className="text-2xl font-bold text-gray-900">
+              <p className="text-sm font-medium text-gray-600 dark:text-gray-300">Logs/Min</p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white">
                 {analyticsData?.metrics.averageLogsPerMinute.toFixed(1) || '0'}
               </p>
             </div>
@@ -390,10 +391,10 @@ export default function AnalyticsPage() {
       </div>
 
       {/* Charts Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
         {/* Log Levels Pie Chart */}
-        <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">Log Levels Distribution</h2>
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Log Levels Distribution</h2>
           <ResponsiveContainer width="100%" height={300}>
             <PieChart>
               <Pie
@@ -416,8 +417,8 @@ export default function AnalyticsPage() {
         </div>
 
         {/* Hourly Log Activity */}
-        <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">Hourly Log Activity</h2>
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Hourly Log Activity</h2>
           <ResponsiveContainer width="100%" height={300}>
             <AreaChart data={hourlyData}>
               <CartesianGrid strokeDasharray="3 3" />
@@ -430,8 +431,8 @@ export default function AnalyticsPage() {
         </div>
 
         {/* Agent Distribution */}
-        <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">Agent Log Distribution</h2>
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Agent Log Distribution</h2>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={agentData}>
               <CartesianGrid strokeDasharray="3 3" />
@@ -444,31 +445,31 @@ export default function AnalyticsPage() {
         </div>
 
         {/* Agent Health Status */}
-        <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">Agent Health Status</h2>
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Agent Health Status</h2>
           <div className="space-y-4">
             {analyticsData?.agentHealth.map((agent) => (
-              <div key={agent.agentId} className="border rounded-lg p-4">
+              <div key={agent.agentId} className="border border-gray-200 dark:border-gray-600 rounded-lg p-4">
                 <div className="flex justify-between items-center mb-2">
-                  <h3 className="font-medium text-gray-900">{agent.agentName}</h3>
+                  <h3 className="font-medium text-gray-900 dark:text-white">{agent.agentName}</h3>
                   <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                    agent.status === 'healthy' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                    agent.status === 'healthy' ? 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300' : 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-300'
                   }`}>
                     {agent.status}
                   </span>
                 </div>
                 <div className="grid grid-cols-3 gap-4 text-sm">
                   <div>
-                    <p className="text-gray-600">Health Score</p>
-                    <p className="font-bold text-gray-900">{agent.healthScore}%</p>
+                    <p className="text-gray-600 dark:text-gray-300">Health Score</p>
+                    <p className="font-bold text-gray-900 dark:text-white">{agent.healthScore}%</p>
                   </div>
                   <div>
-                    <p className="text-gray-600">24h Logs</p>
-                    <p className="font-bold text-gray-900">{agent.logVolume24h}</p>
+                    <p className="text-gray-600 dark:text-gray-300">24h Logs</p>
+                    <p className="font-bold text-gray-900 dark:text-white">{agent.logVolume24h}</p>
                   </div>
                   <div>
-                    <p className="text-gray-600">Errors</p>
-                    <p className="font-bold text-red-600">{agent.errorCount24h}</p>
+                    <p className="text-gray-600 dark:text-gray-300">Errors</p>
+                    <p className="font-bold text-red-600 dark:text-red-400">{agent.errorCount24h}</p>
                   </div>
                 </div>
               </div>
@@ -478,42 +479,47 @@ export default function AnalyticsPage() {
       </div>
 
       {/* Top Patterns */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <h2 className="text-xl font-bold text-gray-900 mb-4">Top Log Patterns</h2>
-        <div className="overflow-x-auto">
-          <table className="min-w-full table-auto">
-            <thead>
-              <tr className="border-b">
-                <th className="text-left py-2 px-4 font-medium text-gray-900">Pattern</th>
-                <th className="text-left py-2 px-4 font-medium text-gray-900">Count</th>
-                <th className="text-left py-2 px-4 font-medium text-gray-900">Percentage</th>
-                <th className="text-left py-2 px-4 font-medium text-gray-900">Severity</th>
-              </tr>
-            </thead>
-            <tbody>
-              {analyticsData?.topPatterns.map((pattern, index) => (
-                <tr key={index} className="border-b hover:bg-gray-50">
-                  <td className="py-2 px-4 text-gray-900">{pattern.pattern}</td>
-                  <td className="py-2 px-4 text-gray-700">{pattern.count}</td>
-                  <td className="py-2 px-4 text-gray-700">{pattern.percentage.toFixed(1)}%</td>
-                  <td className="py-2 px-4">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                      pattern.severity === 'low' ? 'bg-green-100 text-green-800' :
-                      pattern.severity === 'medium' ? 'bg-yellow-100 text-yellow-800' :
-                      'bg-red-100 text-red-800'
-                    }`}>
-                      {pattern.severity}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+        <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">Top Log Patterns</h2>
+        {analyticsData?.topPatterns && analyticsData.topPatterns.length > 0 ? (
+          <div className="space-y-3">
+            {analyticsData.topPatterns.slice(0, 8).map((pattern, index) => (
+              <div key={index} className="flex items-center justify-between p-3 border border-gray-200 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                <div className="flex-1 min-w-0 mr-4">
+                  <p className="text-sm font-medium text-gray-900 dark:text-white truncate" title={pattern.pattern}>
+                    {pattern.pattern}
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    {pattern.count.toLocaleString()} occurrences ({pattern.percentage.toFixed(1)}%)
+                  </p>
+                </div>
+                <div className="flex items-center space-x-2 flex-shrink-0">
+                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                    pattern.severity === 'low' ? 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300' :
+                    pattern.severity === 'medium' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300' :
+                    'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-300'
+                  }`}>
+                    {pattern.severity}
+                  </span>
+                  <span className="text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 px-2 py-1 rounded font-mono">
+                    {pattern.count}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+            <p>No patterns detected yet</p>
+            <p className="text-sm mt-1">Patterns will appear as logs are analyzed</p>
+          </div>
+        )}
       </div>
 
       {/* Data Export Section */}
-      <DataExport />
+      <div className="mt-8">
+        <DataExport />
+      </div>
     </div>
   );
 }

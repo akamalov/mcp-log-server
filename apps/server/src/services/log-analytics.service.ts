@@ -46,7 +46,7 @@ export interface AnalyticsTimeRange {
 }
 
 export class LogAnalyticsService {
-  private clickhouse: ClickHouseLogClient;
+  protected clickhouse: ClickHouseLogClient;
   private anomalyThresholds = {
     volumeSpikeMultiplier: 3.0, // Alert if volume > 3x normal
     errorRateThreshold: 0.1, // Alert if error rate > 10%
@@ -246,6 +246,20 @@ export class LogAnalyticsService {
   }
 
   /**
+   * Format timestamp for ClickHouse queries
+   */
+  protected formatTimestamp(timestamp: string | Date): string {
+    let isoString: string;
+    if (timestamp instanceof Date) {
+      isoString = timestamp.toISOString();
+    } else {
+      isoString = new Date(timestamp).toISOString();
+    }
+    // ClickHouse DateTime64(3) expects format without 'Z' suffix
+    return isoString.replace('T', ' ').replace('Z', '');
+  }
+
+  /**
    * Get analytics summary for dashboard
    */
   async getAnalyticsSummary(): Promise<{
@@ -255,7 +269,7 @@ export class LogAnalyticsService {
     activeAlerts: AnomalyAlert[];
   }> {
     const last24Hours: AnalyticsTimeRange = {
-      start: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // Last 30 days to include all logs
       end: new Date()
     };
 

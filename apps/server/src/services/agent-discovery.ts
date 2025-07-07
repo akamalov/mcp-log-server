@@ -351,19 +351,34 @@ export async function discoverAgents(
     }
   }
 
+  // Validate and filter log paths for all agents
+  console.log('🔍 Validating log paths for all discovered agents...');
+  const validatedAgents: AgentConfig[] = [];
+  
+  for (const agent of agents) {
+    const validatedAgent = await validateAndFilterLogPaths(agent);
+    if (validatedAgent.logPaths.length > 0) {
+      validatedAgents.push(validatedAgent);
+    } else {
+      console.log(`❌ Excluding agent ${agent.name} - no valid log paths found`);
+    }
+  }
+  
   // Log final summary
-  const realCount = agents.filter(a => !a.metadata?.isMock && !a.metadata?.isCustom).length;
-  const mockCount = agents.filter(a => a.metadata?.isMock).length;
-  const customCount = agents.filter(a => a.metadata?.isCustom).length;
+  const realCount = validatedAgents.filter(a => !a.metadata?.isMock && !a.metadata?.isCustom).length;
+  const mockCount = validatedAgents.filter(a => a.metadata?.isMock).length;
+  const customCount = validatedAgents.filter(a => a.metadata?.isCustom).length;
+  const disabledCount = agents.length - validatedAgents.length;
   
   console.log(`📊 Agent discovery summary:`);
   console.log(`   Real agents: ${realCount}`);
   console.log(`   Mock agents: ${mockCount}`);
   console.log(`   Custom agents: ${customCount}`);
-  console.log(`   Total agents: ${agents.length}`);
+  console.log(`   Disabled agents: ${disabledCount}`);
+  console.log(`   Total valid agents: ${validatedAgents.length}`);
   console.log(`   Mixed mode: ${finalConfig.mixedMode ? 'enabled' : 'disabled'}`);
 
-  return agents;
+  return validatedAgents;
 }
 
 /**
@@ -957,6 +972,64 @@ async function detectGeminiAgent(): Promise<AgentConfig | null> {
   }
   
   return null;
+}
+
+/**
+ * Validate and filter log paths for an agent, removing non-existent paths
+ */
+export async function validateAndFilterLogPaths(agent: AgentConfig): Promise<AgentConfig> {
+  if (!agent.logPaths || agent.logPaths.length === 0) {
+    console.log(`⚠️  Agent ${agent.name} has no log paths configured`);
+    return { ...agent, logPaths: [] };
+  }
+
+  const validPaths: string[] = [];
+  const invalidPaths: string[] = [];
+  
+  console.log(`🔍 Validating ${agent.logPaths.length} log paths for ${agent.name}...`);
+  
+  for (const logPath of agent.logPaths) {
+    try {
+      const stat = await fs.stat(logPath);
+      if (stat.isDirectory() || stat.isFile()) {
+        validPaths.push(logPath);
+        console.log(`✅ Valid path: ${logPath}`);
+      } else {
+        invalidPaths.push(logPath);
+        console.log(`❌ Invalid path type: ${logPath}`);
+      }
+    } catch (error) {
+      invalidPaths.push(logPath);
+      console.log(`❌ Path does not exist: ${logPath}`);
+    }
+  }
+  
+  if (invalidPaths.length > 0) {
+    console.log(`⚠️  Removed ${invalidPaths.length} invalid paths for ${agent.name}:`);
+    invalidPaths.forEach(path => console.log(`   - ${path}`));
+  }
+  
+  if (validPaths.length === 0) {
+    console.log(`❌ No valid log paths found for ${agent.name} - agent will be disabled`);
+  } else {
+    console.log(`✅ ${validPaths.length} valid paths found for ${agent.name}`);
+  }
+  
+  // Update agent metadata with validation results
+  const updatedMetadata = {
+    ...agent.metadata,
+    lastValidation: new Date().toISOString(),
+    validPathCount: validPaths.length,
+    invalidPathCount: invalidPaths.length,
+    invalidPaths: invalidPaths
+  };
+  
+  return {
+    ...agent,
+    logPaths: validPaths,
+    enabled: validPaths.length > 0 && agent.enabled,
+    metadata: updatedMetadata
+  };
 }
 
 /**

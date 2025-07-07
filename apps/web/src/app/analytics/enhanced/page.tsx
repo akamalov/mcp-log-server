@@ -56,13 +56,13 @@ export default function EnhancedAnalyticsPage() {
       
       try {
         // Check if backend is running first
-        const healthResponse = await fetch('http://localhost:3001/health');
+        const healthResponse = await fetch('http://localhost:3005/health');
         if (!healthResponse.ok) {
           throw new Error('Backend server is not running');
         }
 
         // Try to fetch enhanced analytics (this endpoint may not exist yet)
-        const response = await fetch(`http://localhost:3001/api/analytics/enhanced?timeRange=${selectedTimeRange}`);
+        const response = await fetch(`http://localhost:3005/api/analytics/enhanced?timeRange=${selectedTimeRange}`);
         
         if (!response.ok) {
           // If enhanced endpoint doesn't exist, generate mock data

@@ -34,7 +34,7 @@ interface TestResult {
   latency?: number;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3005';
 
 export default function ForwardersPage() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);

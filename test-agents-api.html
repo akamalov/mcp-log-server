@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Agents API</title>
+</head>
+<body>
+    <h1>Agents API Test</h1>
+    <div id="result">Loading...</div>
+    
+    <script>
+        fetch('http://localhost:3001/api/agents')
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('result').innerHTML = '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
+            })
+            .catch(error => {
+                document.getElementById('result').innerHTML = 'Error: ' + error.message;
+            });
+    </script>
+</body>
+</html>

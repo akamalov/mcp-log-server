@@ -103,19 +103,6 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
     });
   });
 
-  // Start watching agent log files
-  try {
-    await logWatcherService.startWatching(availableAgents);
-    logger.info('Log watcher started successfully', { 
-      watchedAgents: availableAgents.length,
-      watcherStatus: logWatcherService.getStatus()
-    });
-
-    // Broadcast initial agent status
-    webSocketService.broadcastAgentStatus(availableAgents);
-  } catch (error) {
-    logger.warn('Failed to start log watcher', { error });
-  }
 
   // Graceful shutdown handler for all services
   fastify.addHook('onClose', async () => {
@@ -148,6 +135,58 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
         files: watcherStatus.watchedFiles
       }
     };
+  });
+
+  // Logs API endpoints
+  fastify.get('/api/logs', async (request, reply) => {
+    try {
+      const { limit = 100, offset = 0, search, levels, sources, from, to, sortBy, sortOrder } = request.query as any;
+      
+      if (search || levels || sources || from || to) {
+        // Use search with filters
+        const query = {
+          search,
+          levels: levels ? levels.split(',') : undefined,
+          sources: sources ? sources.split(',') : undefined,
+          from: from,
+          to: to,
+          limit: parseInt(limit),
+          offset: parseInt(offset),
+          sortBy,
+          sortOrder
+        };
+        const logs = await logsService.searchLogs(query);
+        return logs;
+      } else {
+        // Get recent logs
+        const logs = await logsService.getRecentLogs(parseInt(limit));
+        return logs;
+      }
+    } catch (error) {
+      logger.error('Failed to get logs:', error);
+      reply.status(500).send({ error: 'Failed to retrieve logs' });
+    }
+  });
+
+  fastify.get('/api/logs/search', async (request, reply) => {
+    try {
+      const query = request.query as any;
+      const logs = await logsService.searchLogs({
+        search: query.search,
+        levels: query.levels ? query.levels.split(',') : undefined,
+        sources: query.sources ? query.sources.split(',') : undefined,
+        from: query.from,
+        to: query.to,
+        limit: parseInt(query.limit || '100'),
+        offset: parseInt(query.offset || '0'),
+        sortBy: query.sortBy,
+        sortOrder: query.sortOrder
+      });
+      return logs;
+    } catch (error) {
+      logger.error('Failed to search logs:', error);
+      reply.status(500).send({ error: 'Failed to search logs' });
+    }
   });
 
   // Initialize database service for custom agents (optional)
@@ -245,6 +284,24 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
   const availableAgents = await discoverAgents({}, databaseService);
   logger.info('Found available agents', { count: availableAgents.length });
 
+  // Start watching agent log files (after agents are discovered)
+  try {
+    await logWatcherService.startWatching(availableAgents);
+    logger.info('Log watcher started successfully', {
+      watchedAgents: availableAgents.length,
+      watcherStatus: logWatcherService.getStatus()
+    });
+
+    // Broadcast initial agent status
+    webSocketService.broadcastAgentStatus(availableAgents);
+    
+    // Start periodic path validation (every 5 minutes)
+    logWatcherService.startPeriodicValidation(300000);
+    logger.info('Started periodic path validation for log watchers');
+  } catch (error) {
+    logger.warn('Failed to start log watcher', { error });
+  }
+
   // API endpoints for agents
   await fastify.register(async function apiRoutes(fastify) {
     // Get all available agents
@@ -276,25 +333,36 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
       },
     }, async (request, reply) => {
       try {
-        // Get unique source names from the logs
-        const logs = await logsService.getRecentLogs(1000); // Get a good sample of logs
-        const uniqueSources = [...new Set(logs.map(log => log.source))];
-        
-        // Create agent objects with the actual source names from logs
-        const logAgents = uniqueSources.map(source => ({
-          id: source,
-          name: source,
-          available: true,
-          type: 'discovered',
-          isCustom: false
-        }));
+        // Get unique source names from the logs (with error handling)
+        let logAgents = [];
+        try {
+          const logs = await logsService.getRecentLogs(1000);
+          const uniqueSources = [...new Set(logs.map(log => log.source))];
+          logAgents = uniqueSources.map(source => ({
+            id: source,
+            name: source,
+            available: true,
+            type: 'discovered',
+            isCustom: false
+          }));
+        } catch (logError) {
+          logger.warn('Failed to get log sources, using discovered agents:', logError);
+          // Use discovered agents as fallback for log agents
+          logAgents = availableAgents.map(agent => ({
+            id: agent.id,
+            name: agent.name,
+            available: true,
+            type: agent.type,
+            isCustom: false
+          }));
+        }
         
         // Get custom agents if database service is available
         let customAgents = [];
         if (databaseService) {
           try {
             const customAgentsData = await databaseService.getCustomAgents();
-            customAgents = customAgentsData.map(agent => ({
+            customAgents = customAgentsData.map((agent: any) => ({
               id: agent.id,
               name: agent.name,
               available: agent.is_active,
@@ -307,13 +375,26 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
           }
         }
         
-        // Combine log agents and custom agents
+        // Combine log agents and custom agents with deduplication
         const allAgents = [...logAgents, ...customAgents];
         
-        return { agents: allAgents };
+        // Remove duplicates based on name, prioritizing custom agents
+        const uniqueAgents = allAgents.filter((agent, index, arr) => {
+          const firstIndex = arr.findIndex(a => a.name === agent.name);
+          // Keep first occurrence, but if there's a custom agent with same name, prefer custom
+          if (firstIndex === index) return true;
+          if (agent.isCustom && !arr[firstIndex].isCustom) {
+            // Replace non-custom with custom
+            arr[firstIndex] = agent;
+            return false;
+          }
+          return false;
+        });
+        
+        return { agents: uniqueAgents };
       } catch (error) {
         logger.error('Failed to get agents', { error });
-        // Fallback to predefined agents if database query fails
+        // Final fallback to predefined agents
         return { agents: availableAgents };
       }
     });
@@ -575,7 +656,7 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
           success: true,
           agent: updatedAgent
         };
-      } catch (error) {
+      } catch (error: any) {
         const { id } = request.params as { id: string };
         const agentData = request.body as any;
         logger.error('Failed to update custom agent:', { error: error.message, stack: error.stack, id, agentData });
@@ -995,10 +1076,16 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
   const analyticsService = {
     async getAnalyticsSummary() {
       try {
+        // Use the same time range as the enhanced analytics service
+        const timeRange = {
+          start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // Last 30 days
+          end: new Date()
+        };
+
         const [metrics, agentHealth, topPatterns] = await Promise.all([
-          enhancedAnalyticsService.getLogMetrics(),
+          enhancedAnalyticsService.getLogMetrics(timeRange),
           enhancedAnalyticsService.getAgentHealthMetrics(),
-          enhancedAnalyticsService.detectLogPatterns()
+          enhancedAnalyticsService.detectLogPatterns(timeRange, 10)
         ]);
 
         return {
@@ -1040,7 +1127,11 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
 
     async getLogMetrics() {
       try {
-        return await enhancedAnalyticsService.getLogMetrics();
+        const timeRange = {
+          start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+          end: new Date()
+        };
+        return await enhancedAnalyticsService.getLogMetrics(timeRange);
       } catch (error) {
         logger.error('Failed to get log metrics', { error });
         return {
@@ -1077,7 +1168,11 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
 
     async detectLogPatterns() {
       try {
-        const patterns = await enhancedAnalyticsService.detectLogPatterns();
+        const timeRange = {
+          start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+          end: new Date()
+        };
+        const patterns = await enhancedAnalyticsService.detectLogPatterns(timeRange, 20);
         return patterns.map(pattern => ({
           pattern: pattern.pattern,
           count: pattern.count,

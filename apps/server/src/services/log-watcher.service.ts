@@ -3,6 +3,7 @@ import { join, basename } from 'path';
 import { EventEmitter } from 'events';
 import type { AgentConfig, LogEntry } from '@mcp-log-server/types';
 import { LogsService } from './logs.service.js';
+import { LogWatcherValidation } from './log-watcher-validation.js';
 
 interface WatchedFile {
   agentId: string;
@@ -20,6 +21,7 @@ export class LogWatcherService extends EventEmitter {
   private logsService: LogsService;
   private isRunning = false;
   private isWSLEnv = false;
+  private validationInterval?: NodeJS.Timeout;
 
   constructor(logsService: LogsService) {
     super();
@@ -72,6 +74,9 @@ export class LogWatcherService extends EventEmitter {
    */
   async stopWatching(): Promise<void> {
     console.log('🛑 Stopping log watchers...');
+    
+    // Stop periodic validation if running
+    this.stopPeriodicValidation();
     
     for (const [path, watchedFile] of this.watchers) {
       try {
@@ -247,9 +252,9 @@ export class LogWatcherService extends EventEmitter {
         this.setupPollingFallback(filePath, agent);
       }
 
-      // Process any existing content (but don't await to avoid hanging)
+      // Process any existing content from the beginning of the file
       setImmediate(() => {
-        this.processLogFileChanges(filePath, agent).catch(error => {
+        this.processInitialLogContent(filePath, agent).catch(error => {
           console.warn(`❌ Error processing initial log content for ${filePath}:`, error);
         });
       });
@@ -311,6 +316,54 @@ export class LogWatcherService extends EventEmitter {
   }
 
   /**
+   * Process existing content in a log file on startup
+   */
+  private async processInitialLogContent(filePath: string, agent: AgentConfig): Promise<void> {
+    const watchedFile = this.watchers.get(filePath);
+    if (!watchedFile) return;
+
+    try {
+      const stat = await fs.stat(filePath);
+      if (stat.size === 0) {
+        console.log(`📝 Log file ${filePath} is empty, skipping initial processing`);
+        return;
+      }
+
+      console.log(`🔍 Processing initial content of ${filePath} (${stat.size} bytes)`);
+
+      // Special handling for Claude MCP JSON files - read entire file
+      if (agent.logFormat === 'claude-mcp-json' && agent.type === 'claude-mcp') {
+        // Create a temporary watcher config for initial processing
+        const tempWatcher = { ...watchedFile, position: 0 };
+        await this.processClaudeMCPJsonFile(filePath, agent, tempWatcher);
+        return;
+      }
+
+      // For other formats, read and process the entire file
+      const content = await fs.readFile(filePath, 'utf8');
+      const lines = content.split('\n').filter(line => line.trim().length > 0);
+      
+      console.log(`📝 Processing ${lines.length} lines from ${filePath}`);
+
+      for (const line of lines) {
+        try {
+          const logEntry = await this.parseLogLine(line, agent, filePath);
+          if (logEntry) {
+            await this.logsService.ingestLog(logEntry);
+            this.emit('log-entry', logEntry);
+          }
+        } catch (error) {
+          console.warn(`❌ Error parsing line in ${filePath}:`, error.message);
+        }
+      }
+
+      console.log(`✅ Completed initial processing of ${filePath}`);
+    } catch (error) {
+      console.warn(`❌ Error processing initial content for ${filePath}:`, error);
+    }
+  }
+
+  /**
    * Process new content in a log file
    */
   private async processLogFileChanges(filePath: string, agent: AgentConfig): Promise<void> {
@@ -366,30 +419,63 @@ export class LogWatcherService extends EventEmitter {
   private async processClaudeMCPJsonFile(filePath: string, agent: AgentConfig, watchedFile: any): Promise<void> {
     try {
       const content = await fs.readFile(filePath, 'utf8');
+      let processedCount = 0;
       
-      // Parse as JSON array
-      const jsonArray = JSON.parse(content);
-      
-      if (Array.isArray(jsonArray)) {
-        // Process each JSON object in the array
-        for (const jsonObj of jsonArray) {
-          const logEntry = this.parseClaudeMCPJsonLog(JSON.stringify(jsonObj), agent, filePath);
+      // First try to parse as a valid JSON array
+      try {
+        const jsonArray = JSON.parse(content);
+        if (Array.isArray(jsonArray)) {
+          // Process each JSON object in the array
+          for (const jsonObj of jsonArray) {
+            const logEntry = this.parseClaudeMCPJsonLog(JSON.stringify(jsonObj), agent, filePath);
+            if (logEntry) {
+              await this.logsService.ingestLog(logEntry);
+              this.emit('log-entry', logEntry);
+              processedCount++;
+            }
+          }
+          
+          console.log(`📖 Processed ${processedCount} Claude MCP JSON entries from ${basename(filePath)}`);
+        } else {
+          // Single JSON object
+          const logEntry = this.parseClaudeMCPJsonLog(content, agent, filePath);
           if (logEntry) {
             await this.logsService.ingestLog(logEntry);
             this.emit('log-entry', logEntry);
+            processedCount++;
+          }
+          
+          console.log(`📖 Processed 1 Claude MCP JSON entry from ${basename(filePath)}`);
+        }
+      } catch (jsonError) {
+        // If parsing as complete JSON fails, try to extract individual JSON objects
+        console.log(`⚠️  JSON parsing failed for ${basename(filePath)}, trying to extract individual objects`);
+        
+        // Look for JSON objects in the content
+        const lines = content.split('\n');
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed.length === 0) continue;
+          
+          // Try to find JSON objects
+          const jsonMatches = trimmed.match(/\{[^}]*\}/g);
+          if (jsonMatches) {
+            for (const jsonMatch of jsonMatches) {
+              try {
+                const logEntry = this.parseClaudeMCPJsonLog(jsonMatch, agent, filePath);
+                if (logEntry) {
+                  await this.logsService.ingestLog(logEntry);
+                  this.emit('log-entry', logEntry);
+                  processedCount++;
+                }
+              } catch (lineError) {
+                console.warn(`❌ Failed to parse JSON object: ${jsonMatch.substring(0, 50)}...`);
+              }
+            }
           }
         }
         
-        console.log(`📖 Processed ${jsonArray.length} Claude MCP JSON entries from ${basename(filePath)}`);
-      } else {
-        // Single JSON object
-        const logEntry = this.parseClaudeMCPJsonLog(content, agent, filePath);
-        if (logEntry) {
-          await this.logsService.ingestLog(logEntry);
-          this.emit('log-entry', logEntry);
-        }
-        
-        console.log(`📖 Processed 1 Claude MCP JSON entry from ${basename(filePath)}`);
+        console.log(`📖 Extracted and processed ${processedCount} Claude MCP JSON entries from ${basename(filePath)}`);
       }
       
       // Update position and last activity
@@ -945,5 +1031,91 @@ export class LogWatcherService extends EventEmitter {
     }
     
     console.log('✅ Log watcher restarted successfully');
+  }
+
+  /**
+   * Validate all currently watched paths and stop monitoring invalid ones
+   */
+  public async validateWatchedPaths(): Promise<{ validPaths: string[], invalidPaths: string[] }> {
+    console.log("🔍 Validating all currently watched paths...");
+    
+    const validPaths: string[] = [];
+    const invalidPaths: string[] = [];
+    const pathsToRemove: string[] = [];
+    
+    for (const [filePath, watchedFile] of this.watchers) {
+      try {
+        const stat = await fs.stat(filePath);
+        if (stat.isDirectory() || stat.isFile()) {
+          validPaths.push(filePath);
+          // Reset error count for valid paths
+          watchedFile.errorCount = 0;
+          watchedFile.isHealthy = true;
+        } else {
+          invalidPaths.push(filePath);
+          pathsToRemove.push(filePath);
+        }
+      } catch (error) {
+        invalidPaths.push(filePath);
+        pathsToRemove.push(filePath);
+        console.log(`❌ Path no longer exists: ${filePath}`);
+      }
+    }
+    
+    // Remove watchers for invalid paths
+    for (const pathToRemove of pathsToRemove) {
+      const watchedFile = this.watchers.get(pathToRemove);
+      if (watchedFile) {
+        console.log(`🚫 Stopping watcher for invalid path: ${pathToRemove}`);
+        try {
+          watchedFile.watcher.close();
+        } catch (error) {
+          console.warn(`⚠️  Error closing watcher for ${pathToRemove}:`, error);
+        }
+        this.watchers.delete(pathToRemove);
+        
+        // Emit event for path removal
+        this.emit("path-removed", { 
+          agentId: watchedFile.agentId, 
+          path: pathToRemove, 
+          reason: "path-invalid" 
+        });
+      }
+    }
+    
+    if (invalidPaths.length > 0) {
+      console.log(`⚠️  Removed ${invalidPaths.length} invalid watchers`);
+      this.emit("paths-cleaned", { validCount: validPaths.length, invalidCount: invalidPaths.length });
+    }
+    
+    console.log(`✅ Path validation complete: ${validPaths.length} valid, ${invalidPaths.length} invalid`);
+    
+    return { validPaths, invalidPaths };
+  }
+  
+  /**
+   * Start periodic path validation (runs every 5 minutes)
+   */
+  public startPeriodicValidation(intervalMs: number = 300000): void {
+    console.log(`🔄 Starting periodic path validation (every ${intervalMs/1000}s)`);
+    
+    this.validationInterval = setInterval(async () => {
+      try {
+        await this.validateWatchedPaths();
+      } catch (error) {
+        console.warn("⚠️  Error during periodic path validation:", error);
+      }
+    }, intervalMs);
+  }
+  
+  /**
+   * Stop periodic path validation
+   */
+  public stopPeriodicValidation(): void {
+    if (this.validationInterval) {
+      clearInterval(this.validationInterval);
+      this.validationInterval = undefined;
+      console.log("✅ Stopped periodic path validation");
+    }
   }
 } 

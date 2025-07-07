@@ -156,7 +156,7 @@ export class ClickHouseLogClient {
     };
 
     await this.client.insert({
-      table: 'log_entries',
+      table: 'mcp_logs.log_entries',
       values: [row],
       format: 'JSONEachRow',
     });
@@ -190,7 +190,7 @@ export class ClickHouseLogClient {
     }));
 
     await this.client.insert({
-      table: 'log_entries',
+      table: 'mcp_logs.log_entries',
       values: rows,
       format: 'JSONEachRow',
     });
@@ -230,7 +230,7 @@ export class ClickHouseLogClient {
       conditions.push(`(message LIKE '%${search}%' OR raw_log LIKE '%${search}%')`);
     }
 
-    let query = 'SELECT * FROM log_entries';
+    let query = 'SELECT * FROM mcp_logs.log_entries';
 
     if (conditions.length > 0) {
       query += ` WHERE ${conditions.join(' AND ')}`;
@@ -294,7 +294,7 @@ export class ClickHouseLogClient {
         quantile(0.99)(duration_ms) as p99_duration_ms,
         min(timestamp) as period_start,
         max(timestamp) as period_end
-      FROM log_entries
+      FROM mcp_logs.log_entries
     `;
 
     if (conditions.length > 0) {
@@ -330,7 +330,7 @@ export class ClickHouseLogClient {
     };
 
     await this.client.insert({
-      table: 'error_patterns',
+      table: 'mcp_logs.error_patterns',
       values: [row],
       format: 'JSONEachRow',
     });
@@ -353,7 +353,7 @@ export class ClickHouseLogClient {
           when count() > 100 then 'frequent'
           else 'normal'
         end as error_type
-      FROM log_entries 
+      FROM mcp_logs.log_entries 
       WHERE level IN ('error', 'fatal')
     `;
 
@@ -415,7 +415,7 @@ export class ClickHouseLogClient {
     };
 
     await this.client.insert({
-      table: 'session_analytics',
+      table: 'mcp_logs.session_analytics',
       values: [row],
       format: 'JSONEachRow',
     });
@@ -435,7 +435,7 @@ export class ClickHouseLogClient {
         countIf(level = 'warn') as warning_count,
         min(timestamp) as start_time,
         max(timestamp) as end_time
-      FROM log_entries
+      FROM mcp_logs.log_entries
       WHERE session_id IS NOT NULL
     `;
 
@@ -478,7 +478,7 @@ export class ClickHouseLogClient {
     };
 
     await this.client.insert({
-      table: 'performance_metrics',
+      table: 'mcp_logs.performance_metrics',
       values: [row],
       format: 'JSONEachRow',
     });
@@ -495,7 +495,7 @@ export class ClickHouseLogClient {
         'stable' as trend,
         min(timestamp) as period_start,
         max(timestamp) as period_end
-      FROM performance_metrics
+      FROM mcp_logs.performance_metrics
       WHERE metric_name = 'response_time'
     `;
 
@@ -633,7 +633,7 @@ export class ClickHouseLogClient {
 
   // Cleanup and Maintenance
   async optimizeTables(): Promise<void> {
-    const tables = ['log_entries', 'error_patterns', 'session_analytics', 'performance_metrics'];
+    const tables = ['mcp_logs.log_entries', 'mcp_logs.error_patterns', 'mcp_logs.session_analytics', 'mcp_logs.performance_metrics'];
     
     for (const table of tables) {
       await this.client.command({
@@ -644,7 +644,7 @@ export class ClickHouseLogClient {
 
   async getRecentLogs(limit: number = 100): Promise<LogEntryRow[]> {
     const query = `
-      SELECT * FROM log_entries 
+      SELECT * FROM mcp_logs.log_entries 
       ORDER BY timestamp DESC 
       LIMIT ${limit}
     `;
@@ -661,7 +661,7 @@ export class ClickHouseLogClient {
   async getLogCount(options: Partial<LogQueryOptions> = {}): Promise<number> {
     const { startTime, endTime, levels, sourceIds } = options;
     
-    let query = 'SELECT COUNT(*) as count FROM log_entries';
+    let query = 'SELECT COUNT(*) as count FROM mcp_logs.log_entries';
     const conditions: string[] = [];
 
     if (startTime) conditions.push(`timestamp >= '${this.formatTimestamp(startTime)}'`);
@@ -693,7 +693,7 @@ export class ClickHouseLogClient {
     const { startTime, endTime, levels, sourceIds, limit = 100, offset = 0 } = options;
     
     let query = `
-      SELECT * FROM log_entries 
+      SELECT * FROM mcp_logs.log_entries 
       WHERE (message LIKE '%${searchQuery}%' OR raw_log LIKE '%${searchQuery}%')
     `;
     

@@ -13,7 +13,7 @@ export default function Dashboard() {
       setError(null);
       try {
         // Fetch analytics summary data
-        const analyticsRes = await fetch("http://localhost:3001/api/analytics/summary");
+        const analyticsRes = await fetch("http://localhost:3005/api/analytics/summary");
         if (!analyticsRes.ok) {
           throw new Error(`Analytics API returned ${analyticsRes.status}`);
         }
@@ -21,7 +21,7 @@ export default function Dashboard() {
         setDashboardData(analyticsData);
         
         // Fetch agents
-        const agentsRes = await fetch("http://localhost:3001/api/agents");
+        const agentsRes = await fetch("http://localhost:3005/api/agents");
         if (!agentsRes.ok) {
           throw new Error(`Agents API returned ${agentsRes.status}`);
         }
