@@ -242,6 +242,7 @@ export class DatabaseService {
       logPaths: config.logPaths || (logSource.log_path ? [logSource.log_path] : []),
       logFormat: logSource.format_type,
       filters: logSource.filters || ['info', 'warn', 'error'],
+      isCustom: !logSource.auto_discovery,
       metadata: {
         ...config.metadata,
         isCustom: !logSource.auto_discovery,

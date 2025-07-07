@@ -202,14 +202,28 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
     } catch (error) {
       logger.warn('⚠️ Database service not available, using in-memory storage for custom agents:', error);
       // Create a minimal in-memory database service for development
+      const logSourceToAgentConfig = (logSource: any): AgentConfig => {
+        const config = logSource.config || {};
+        return {
+          id: logSource.id,
+          name: logSource.name,
+          type: logSource.type,
+          enabled: logSource.is_active,
+          logPaths: logSource.log_paths || [],
+          logFormat: logSource.format_type,
+          filters: logSource.filters || ['info', 'warn', 'error'],
+          isCustom: true,
+          metadata: {
+            ...logSource.metadata,
+            isCustom: true,
+            createdAt: logSource.created_at,
+            updatedAt: logSource.updated_at
+          }
+        };
+      };
+
       databaseService = {
         getCustomAgents: async () => {
-          console.log('Getting custom agents, count:', customAgents.length);
-          if (customAgents.length > 0) {
-            console.log('First agent keys:', Object.keys(customAgents[0]));
-            console.log('First agent:', customAgents[0]);
-            console.log('JSON.stringify test:', JSON.stringify(customAgents[0]));
-          }
           return customAgents;
         },
         createCustomAgent: async (agentData: any) => {
@@ -244,38 +258,23 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
           if (agentData.type !== undefined) transformedData.type = agentData.type;
           if (agentData.logPaths !== undefined) {
             transformedData.log_paths = agentData.logPaths;
-            // Also update the legacy log_path field for compatibility
-            transformedData.log_path = Array.isArray(agentData.logPaths) ? agentData.logPaths[0] : agentData.logPaths;
-            // Update config.logPaths as well
-            transformedData.config = {
-              ...currentAgent.config,
-              logPaths: agentData.logPaths
-            };
           }
-          if (agentData.logFormat !== undefined) transformedData.format_type = agentData.logFormat;
           if (agentData.enabled !== undefined) transformedData.is_active = agentData.enabled;
+          if (agentData.logFormat !== undefined) transformedData.format_type = agentData.logFormat;
           if (agentData.filters !== undefined) transformedData.filters = agentData.filters;
           if (agentData.metadata !== undefined) transformedData.metadata = agentData.metadata;
-          
-          customAgents[index] = { 
-            ...customAgents[index], 
-            ...transformedData, 
-            updated_at: new Date().toISOString() 
-          };
-          
+
+          customAgents[index] = { ...currentAgent, ...transformedData, updated_at: new Date().toISOString() };
           return customAgents[index];
         },
         deleteCustomAgent: async (id: string) => {
           const index = customAgents.findIndex(a => a.id === id);
-          if (index === -1) throw new Error('Agent not found');
+          if (index === -1) return false;
           customAgents.splice(index, 1);
-          return { success: true, message: 'Agent deleted successfully' };
+          return true;
         },
-        getCustomAgent: async (id: string) => {
-          return customAgents.find(a => a.id === id);
-        }
+        logSourceToAgentConfig: logSourceToAgentConfig
       };
-      logger.info('✅ In-memory custom agent storage initialized');
     }
   }
 
@@ -305,125 +304,44 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
   // API endpoints for agents
   await fastify.register(async function apiRoutes(fastify) {
     // Get all available agents
-    fastify.get('/api/agents', {
-      schema: {
-        description: 'Get all available agents',
-        tags: ['Agents'],
-        response: {
-          200: {
-            type: 'object',
-            properties: {
-              agents: {
-                type: 'array',
-                items: {
-                  type: 'object',
-                  properties: {
-                    id: { type: 'string' },
-                    name: { type: 'string' },
-                    available: { type: 'boolean' },
-                    type: { type: 'string' },
-                    isCustom: { type: 'boolean' },
-                    config: { type: 'object' },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    }, async (request, reply) => {
+    fastify.get('/api/agents', async (request, reply) => {
       try {
-        // Get unique source names from the logs (with error handling)
-        let logAgents = [];
-        try {
-          const logs = await logsService.getRecentLogs(1000);
-          const uniqueSources = [...new Set(logs.map(log => log.source))];
-          logAgents = uniqueSources.map(source => ({
-            id: source,
-            name: source,
-            available: true,
-            type: 'discovered',
-            isCustom: false
-          }));
-        } catch (logError) {
-          logger.warn('Failed to get log sources, using discovered agents:', logError);
-          // Use discovered agents as fallback for log agents
-          logAgents = availableAgents.map(agent => ({
-            id: agent.id,
-            name: agent.name,
-            available: true,
-            type: agent.type,
-            isCustom: false
-          }));
-        }
-        
-        // Get custom agents if database service is available
-        let customAgents = [];
-        if (databaseService) {
-          try {
-            const customAgentsData = await databaseService.getCustomAgents();
-            customAgents = customAgentsData.map((agent: any) => ({
-              id: agent.id,
-              name: agent.name,
-              available: agent.is_active,
-              type: 'custom',
-              config: agent.config,
-              isCustom: true
-            }));
-          } catch (error) {
-            logger.warn('Error fetching custom agents:', error);
+        // Get status for all watched files at once
+        const watchedFiles = logWatcherService.getWatchedFiles();
+        const agentStatusMap = new Map<string, { isHealthy: boolean; watchedFiles: number }>();
+
+        for (const file of watchedFiles) {
+          if (!agentStatusMap.has(file.agentId)) {
+            agentStatusMap.set(file.agentId, { isHealthy: true, watchedFiles: 0 });
+          }
+          const status = agentStatusMap.get(file.agentId)!;
+          status.watchedFiles++;
+          if (!file.isHealthy) {
+            status.isHealthy = false;
           }
         }
-        
-        // Combine log agents and custom agents with deduplication
-        const allAgents = [...logAgents, ...customAgents];
-        
-        // Remove duplicates based on name, prioritizing custom agents
-        const uniqueAgents = allAgents.filter((agent, index, arr) => {
-          const firstIndex = arr.findIndex(a => a.name === agent.name);
-          // Keep first occurrence, but if there's a custom agent with same name, prefer custom
-          if (firstIndex === index) return true;
-          if (agent.isCustom && !arr[firstIndex].isCustom) {
-            // Replace non-custom with custom
-            arr[firstIndex] = agent;
-            return false;
-          }
-          return false;
+
+        // Return all agents, but enrich with status
+        const agentsWithStatus = availableAgents.map(agent => {
+          const status = agentStatusMap.get(agent.id) || { isHealthy: false, watchedFiles: 0 };
+          return { ...agent, status };
         });
-        
-        return { agents: uniqueAgents };
+
+        reply.send(agentsWithStatus);
       } catch (error) {
-        logger.error('Failed to get agents', { error });
-        // Final fallback to predefined agents
-        return { agents: availableAgents };
+        logger.error('Failed to get agents:', error);
+        reply.status(500).send({ error: 'Failed to retrieve agents' });
       }
     });
 
     // Get all discovered (non-custom) agents
-    fastify.get('/api/agents/discovered', {
-      schema: {
-        description: 'Get all discovered (non-custom) agents',
-        tags: ['Agents'],
-        response: {
-          200: {
-            type: 'array',
-            items: {
-              type: 'object',
-              // Loosening the schema to match the agent structure
-            }
-          }
-        }
-      }
-    }, async (request, reply) => {
+    fastify.get('/api/agents/discovered', async (request, reply) => {
       try {
-        // Correctly filter for agents that are NOT custom agents.
-        // Auto-discovered agents do not have `isCustom: true`.
-        const discovered = availableAgents.filter(agent => !agent.isCustom);
-        return discovered;
+        const discovered = availableAgents.filter(agent => agent.metadata && !agent.metadata.isCustom);
+        reply.send(discovered);
       } catch (error) {
-        logger.error('Failed to get discovered agents', { error });
-        reply.code(500);
-        return { error: 'Failed to retrieve discovered agents' };
+        logger.error('Failed to get discovered agents:', error);
+        reply.status(500).send({ error: 'Failed to retrieve discovered agents' });
       }
     });
 
@@ -455,35 +373,13 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
     // Custom Agent Management Routes
     
     // Get all custom agents
-    fastify.get('/api/agents/custom', {
-      schema: {
-        description: 'Get all custom agents',
-        tags: ['Custom Agents'],
-        response: {
-          200: {
-            type: 'array',
-            items: { type: 'object' }
-          }
-        }
-      }
-    }, async (request, reply) => {
-      if (!databaseService) {
-        reply.code(503);
-        return { error: 'Database service not available' };
-      }
-      
+    fastify.get('/api/agents/custom', async (request, reply) => {
       try {
-        const customAgents = await databaseService.getCustomAgents();
-        console.log('About to return customAgents:', JSON.stringify(customAgents));
-        
-        // Try returning without schema validation by using raw send
-        reply.code(200)
-          .header('content-type', 'application/json')
-          .send(JSON.stringify(customAgents));
+        const custom = availableAgents.filter(agent => agent.metadata && agent.metadata.isCustom);
+        reply.send(custom);
       } catch (error) {
         logger.error('Failed to get custom agents:', error);
-        reply.code(500);
-        return { error: 'Failed to fetch custom agents' };
+        reply.status(500).send({ error: 'Failed to retrieve custom agents' });
       }
     });
 
