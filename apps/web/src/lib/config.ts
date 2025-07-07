@@ -13,4 +13,10 @@ const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:300
 
 export const config = {
   backendUrl: BACKEND_URL,
-}; 
+};
+
+export function getWebSocketUrl(path: string = ''): string {
+  const url = new URL(config.backendUrl);
+  const protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${url.host}${path}`;
+} 

@@ -7,6 +7,7 @@ import {
 } from 'recharts';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import DataExport from '@/components/export/DataExport';
+import { config, getWebSocketUrl } from '@/lib/config';
 
 // Color palette for charts
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#82CA9D'];
@@ -114,7 +115,7 @@ export default function AnalyticsPage() {
   }, []);
 
   const handleWebSocketError = useCallback((error: any) => {
-    const wsUrl = getWebSocketUrl();
+    const wsUrl = getWebSocketUrl('/ws/analytics');
     console.error('❌ WebSocket error:', {
       type: error.type,
       target: error.target?.readyState,
@@ -125,18 +126,9 @@ export default function AnalyticsPage() {
     setError(`Real-time connection error: ${error.type || 'Connection failed'} (${wsUrl})`);
   }, []);
 
-  // Determine WebSocket URL dynamically
-  const getWebSocketUrl = () => {
-    if (typeof window === 'undefined') return 'ws://localhost:3001/ws/analytics';
-    
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.hostname === 'localhost' ? 'localhost:3001' : window.location.host;
-    return `${protocol}//${host}/ws/analytics`;
-  };
-
   // WebSocket connection for real-time updates
-  const webSocket = useWebSocket({
-    url: getWebSocketUrl(),
+  const { isConnected, isConnecting, reconnectAttempts } = useWebSocket({
+    url: getWebSocketUrl('/ws/analytics'),
     onMessage: handleWebSocketMessage,
     onConnect: handleWebSocketConnect,
     onDisconnect: handleWebSocketDisconnect,
@@ -151,11 +143,11 @@ export default function AnalyticsPage() {
     let pollInterval: NodeJS.Timeout;
     
     // If WebSocket is not connected and not attempting to connect, start polling
-    if (!webSocket.isConnected && !webSocket.isConnecting && webSocket.reconnectAttempts >= 10) {
+    if (!isConnected && !isConnecting && reconnectAttempts >= 10) {
       console.log('🔄 WebSocket failed, falling back to polling');
       pollInterval = setInterval(async () => {
         try {
-          const response = await fetch('http://localhost:3001/api/analytics/summary');
+          const response = await fetch(`${config.backendUrl}/api/analytics/summary`);
           if (response.ok) {
             const data = await response.json();
             setAnalyticsData(data);
@@ -172,13 +164,13 @@ export default function AnalyticsPage() {
         clearInterval(pollInterval);
       }
     };
-  }, [webSocket.isConnected, webSocket.isConnecting, webSocket.reconnectAttempts]);
+  }, [isConnected, isConnecting, reconnectAttempts]);
 
   // Check backend health and fetch initial analytics data
   useEffect(() => {
     async function checkBackendHealth() {
       try {
-        const healthResponse = await fetch('http://localhost:3001/health');
+        const healthResponse = await fetch(`${config.backendUrl}/health`);
         if (!healthResponse.ok) {
           throw new Error(`Health check failed: ${healthResponse.status}`);
         }
@@ -200,7 +192,7 @@ export default function AnalyticsPage() {
       await checkBackendHealth();
       
       try {
-        const response = await fetch('http://localhost:3001/api/analytics/summary');
+        const response = await fetch(`${config.backendUrl}/api/analytics/summary`);
         if (!response.ok) {
           throw new Error(`API returned ${response.status}`);
         }
@@ -295,12 +287,12 @@ export default function AnalyticsPage() {
           {/* Real-time Status Indicator */}
           <div className="flex items-center space-x-2">
             <div className={`w-3 h-3 rounded-full ${
-              webSocket.isConnected ? 'bg-green-500 animate-pulse' : 
-              webSocket.reconnectAttempts >= 3 ? 'bg-yellow-500' : 'bg-red-500'
+              isConnected ? 'bg-green-500 animate-pulse' : 
+              reconnectAttempts >= 3 ? 'bg-yellow-500' : 'bg-red-500'
             }`}></div>
             <span className="text-sm text-gray-600">
-              {webSocket.isConnected ? 'Live' : 
-               webSocket.reconnectAttempts >= 3 ? 'Polling' : 'Disconnected'}
+              {isConnected ? 'Live' : 
+               reconnectAttempts >= 3 ? 'Polling' : 'Disconnected'}
             </span>
           </div>
           
