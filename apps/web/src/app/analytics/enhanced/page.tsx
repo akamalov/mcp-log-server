@@ -97,16 +97,22 @@ export default function EnhancedAnalyticsPage() {
 
   useEffect(() => {
     if (mode === 'live') {
-      fetchEnhancedAnalytics(); // fetch immediately
-      intervalRef.current = setInterval(fetchEnhancedAnalytics, 5000); // fetch every 5s
-      return () => {
-        if (intervalRef.current) clearInterval(intervalRef.current);
-      };
-    } else {
+      fetchEnhancedAnalytics();
       if (intervalRef.current) clearInterval(intervalRef.current);
+      intervalRef.current = setInterval(fetchEnhancedAnalytics, 5000);
+    } else {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      if (mode === 'manual') fetchEnhancedAnalytics();
     }
-    // Only fetch once in manual mode
-    if (mode === 'manual') fetchEnhancedAnalytics();
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, selectedTimeRange]);
 
