@@ -51,6 +51,7 @@ export default function EnhancedAnalyticsPage() {
   const [selectedTimeRange, setSelectedTimeRange] = useState('24h');
   const [selectedView, setSelectedView] = useState('performance');
   const [mode, setMode] = useState<'live' | 'manual'>('manual');
+  const [modeSwitching, setModeSwitching] = useState(false);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const [logs, setLogs] = useState<any[]>([]);
   const [logPage, setLogPage] = useState(0);
@@ -96,21 +97,28 @@ export default function EnhancedAnalyticsPage() {
   };
 
   useEffect(() => {
+    setModeSwitching(true);
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+      console.log('Interval cleared on mode change');
+    }
     if (mode === 'live') {
       fetchEnhancedAnalytics();
-      if (intervalRef.current) clearInterval(intervalRef.current);
-      intervalRef.current = setInterval(fetchEnhancedAnalytics, 5000);
-    } else {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-      if (mode === 'manual') fetchEnhancedAnalytics();
+      intervalRef.current = setInterval(() => {
+        fetchEnhancedAnalytics();
+        console.log('Live interval tick');
+      }, 5000);
+      console.log('Interval created for Live mode');
+    } else if (mode === 'manual') {
+      fetchEnhancedAnalytics();
     }
+    setModeSwitching(false);
     return () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
+        console.log('Interval cleared on unmount');
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -545,13 +553,15 @@ export default function EnhancedAnalyticsPage() {
             <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Mode:</label>
             <button
               className={`px-3 py-1 rounded ${mode === 'live' ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'}`}
-              onClick={() => setMode('live')}
+              onClick={() => !modeSwitching && setMode('live')}
+              disabled={modeSwitching}
             >
               Go Live
             </button>
             <button
               className={`px-3 py-1 rounded ${mode === 'manual' ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'}`}
-              onClick={() => setMode('manual')}
+              onClick={() => !modeSwitching && setMode('manual')}
+              disabled={modeSwitching}
             >
               Manual Pull
             </button>
