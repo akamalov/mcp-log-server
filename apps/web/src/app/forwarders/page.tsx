@@ -181,12 +181,12 @@ export default function ForwardersPage() {
     setIsEditDialogOpen(true);
   };
 
-  const getProtocolBadgeColor = (protocol: string) => {
+  const getProtocolBadgeColor = (protocol: string | undefined) => {
     switch (protocol) {
-      case 'udp': return 'bg-blue-100 text-blue-800';
-      case 'tcp': return 'bg-green-100 text-green-800';
-      case 'tcp-tls': return 'bg-purple-100 text-purple-800';
-      default: return 'bg-gray-100 text-gray-800';
+      case 'udp': return 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300';
+      case 'tcp': return 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300';
+      case 'tcp-tls': return 'bg-purple-100 text-purple-800 dark:bg-purple-900/20 dark:text-purple-300';
+      default: return 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300';
     }
   };
 
@@ -302,13 +302,13 @@ export default function ForwardersPage() {
                     <div className="flex items-center justify-between">
                       <span className="text-sm text-gray-600 dark:text-gray-400">Protocol:</span>
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getProtocolBadgeColor(forwarder.protocol)}`}>
-                        {forwarder.protocol.toUpperCase()}
+                        {forwarder.protocol?.toUpperCase() || 'UDP'}
                       </span>
                     </div>
                     
                     <div className="flex items-center justify-between">
                       <span className="text-sm text-gray-600 dark:text-gray-400">Format:</span>
-                      <span className="text-sm font-medium text-gray-900 dark:text-white">{forwarder.format.toUpperCase()}</span>
+                      <span className="text-sm font-medium text-gray-900 dark:text-white">{forwarder.format?.toUpperCase() || 'RFC3164'}</span>
                     </div>
                     
                     <div className="flex items-center justify-between">
