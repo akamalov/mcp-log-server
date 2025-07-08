@@ -3,11 +3,6 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Settings, Trash2, Wifi, WifiOff, TestTube2, AlertCircle, CheckCircle } from 'lucide-react';
-import { Forwarder } from '@/app/types/forwarder';
-import { useQuery as useQueryTanstack } from '@tanstack/react-query';
-import { AddForwarderDialog } from './AddForwarderDialog';
-import { Button } from '@/components/ui/button';
-import { toast } from '@/components/ui/use-toast';
 import { config } from '@/lib/config';
 
 interface SyslogForwarder {
@@ -97,24 +92,30 @@ export default function ForwardersPage() {
   // Update forwarder mutation  
   const updateMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: Partial<SyslogForwarder> }) => {
+      console.log('Update mutation called with:', { id, data });
       const response = await fetch(`${API_BASE}/api/syslog/forwarders/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
       });
+      console.log('Update response status:', response.status);
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.message || 'Failed to update forwarder');
       }
-      return response.json();
+      const result = await response.json();
+      console.log('Update response:', result);
+      return result;
     },
     onSuccess: () => {
+      console.log('Update successful');
       queryClient.invalidateQueries({ queryKey: ['syslog-forwarders'] });
       setIsEditDialogOpen(false);
       setSelectedForwarder(null);
       showNotification('success', 'Syslog forwarder updated successfully');
     },
     onError: (error) => {
+      console.error('Update error:', error);
       showNotification('error', error.message || 'Failed to update forwarder');
     },
   });
@@ -122,19 +123,25 @@ export default function ForwardersPage() {
   // Delete forwarder mutation
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
+      console.log('Delete mutation called with ID:', id);
       const response = await fetch(`${API_BASE}/api/syslog/forwarders/${id}`, {
         method: 'DELETE',
       });
+      console.log('Delete response status:', response.status);
       if (!response.ok) {
         throw new Error('Failed to delete forwarder');
       }
-      return response.json();
+      const result = await response.json();
+      console.log('Delete response:', result);
+      return result;
     },
     onSuccess: () => {
+      console.log('Delete successful');
       queryClient.invalidateQueries({ queryKey: ['syslog-forwarders'] });
       showNotification('success', 'Syslog forwarder deleted successfully');
     },
     onError: (error) => {
+      console.error('Delete error:', error);
       showNotification('error', error.message || 'Failed to delete forwarder');
     },
   });
@@ -171,12 +178,15 @@ export default function ForwardersPage() {
   };
 
   const handleDelete = (id: string) => {
+    console.log('Delete clicked for forwarder ID:', id);
     if (confirm('Are you sure you want to delete this forwarder?')) {
+      console.log('Delete confirmed, calling mutation...');
       deleteMutation.mutate(id);
     }
   };
 
   const handleEdit = (forwarder: SyslogForwarder) => {
+    console.log('Edit clicked for forwarder:', forwarder);
     setSelectedForwarder(forwarder);
     setIsEditDialogOpen(true);
   };
