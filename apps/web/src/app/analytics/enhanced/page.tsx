@@ -46,6 +46,11 @@ interface EnhancedAnalytics {
 
 let intervalIdCounter = 0;
 
+// Global interval tracking for debugging
+if (typeof window !== 'undefined' && !window.__enhancedLogIntervalId) {
+  window.__enhancedLogIntervalId = null;
+}
+
 export default function EnhancedAnalyticsPage() {
   const [analyticsData, setAnalyticsData] = useState<EnhancedAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
@@ -100,37 +105,45 @@ export default function EnhancedAnalyticsPage() {
 
   // Dedicated effect for interval management
   useEffect(() => {
-    // Brute-force clear all intervals (dev/debug only)
-    for (let i = 1; i < 20000; i++) {
-      clearInterval(i);
-    }
     if (mode === 'live') {
       if (!intervalRef.current) {
         fetchEnhancedAnalytics();
-        intervalIdCounter++;
-        intervalRef.current = setInterval(() => {
+        window.__enhancedLogIntervalId = setInterval(() => {
           fetchEnhancedAnalytics();
-          console.log('Live interval tick, id:', intervalIdCounter);
+          console.log('Live interval tick, id:', window.__enhancedLogIntervalId);
         }, 5000);
-        console.log('Interval created for Live mode, id:', intervalIdCounter);
-      } else {
-        console.warn('Attempted to create interval but one already exists, id:', intervalIdCounter);
+        intervalRef.current = window.__enhancedLogIntervalId;
+        console.log('Interval created for Live mode, id:', window.__enhancedLogIntervalId);
       }
     } else {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
-        console.log('Interval cleared because mode is not live, id:', intervalIdCounter);
+        console.log('Interval cleared because mode is not live, id:', intervalRef.current);
         intervalRef.current = null;
+        window.__enhancedLogIntervalId = null;
       }
     }
     return () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
-        console.log('Interval cleared on unmount, id:', intervalIdCounter);
+        console.log('Interval cleared on unmount, id:', intervalRef.current);
         intervalRef.current = null;
+        window.__enhancedLogIntervalId = null;
       }
     };
   }, [mode]);
+
+  // Always clear interval on every render if not live
+  useEffect(() => {
+    if (mode !== 'live') {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        console.log('Interval forcibly cleared on render, id:', intervalRef.current);
+        intervalRef.current = null;
+        window.__enhancedLogIntervalId = null;
+      }
+    }
+  });
 
   // Fetch analytics data once on mode or time range change
   useEffect(() => {
@@ -541,6 +554,10 @@ export default function EnhancedAnalyticsPage() {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-8">
       <div className="max-w-7xl mx-auto">
+        {/* Debug Panel */}
+        <div className="mb-4 p-2 bg-yellow-100 border border-yellow-400 text-yellow-800 rounded text-xs">
+          <strong>Debug:</strong> mode = {mode}, intervalRef.current = {String(intervalRef.current)}, window.__enhancedLogIntervalId = {String(typeof window !== 'undefined' ? window.__enhancedLogIntervalId : 'N/A')}
+        </div>
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Enhanced Analytics</h1>
