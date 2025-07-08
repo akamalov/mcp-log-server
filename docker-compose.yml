@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./apps/server
+    environment:
+      - NODE_ENV=production
+      # - CURSOR_LOGS_PATH=/host-cursor-logs  # Uncomment if mounting host logs
+    ports:
+      - "3001:3001"
+    depends_on:
+      - clickhouse
+    # volumes:
+    #   - ~/.cursor/logs:/host-cursor-logs:ro  # Uncomment to mount host logs
+
+  frontend:
+    build: ./apps/web
+    environment:
+      - NODE_ENV=production
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+
+volumes:
+  clickhouse-data: 

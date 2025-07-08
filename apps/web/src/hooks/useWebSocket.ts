@@ -9,6 +9,7 @@ interface RealtimeMessage {
 
 interface UseWebSocketOptions {
   url: string;
+  enabled?: boolean;
   autoReconnect?: boolean;
   reconnectInterval?: number;
   maxReconnectAttempts?: number;
@@ -30,6 +31,7 @@ interface WebSocketState {
 export function useWebSocket(options: UseWebSocketOptions) {
   const {
     url,
+    enabled = true,
     autoReconnect = true,
     reconnectInterval = 5000,
     maxReconnectAttempts = 5,
@@ -209,18 +211,19 @@ export function useWebSocket(options: UseWebSocketOptions) {
 
   useEffect(() => {
     mountedRef.current = true;
-    
-    // Only connect on client side after component mounts
-    if (typeof window !== 'undefined') {
+
+    if (enabled && typeof window !== 'undefined') {
       connect();
       setupHeartbeat();
+    } else {
+      disconnect();
     }
 
     return () => {
       mountedRef.current = false;
       disconnect();
     };
-  }, [url, connect, disconnect]);
+  }, [url, enabled, connect, disconnect]);
 
   return {
     isConnected: state.isConnected,

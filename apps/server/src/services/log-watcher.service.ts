@@ -391,12 +391,12 @@ export class LogWatcherService extends EventEmitter {
       const lines = newContent.split('\n').filter(line => line.trim());
 
       if (lines.length > 0) {
-        console.log(`📖 Processing ${lines.length} new log lines from ${basename(filePath)}`);
-
+        console.log(`📖 [DEBUG] Detected ${lines.length} new log lines from ${basename(filePath)}`);
         for (const line of lines) {
           const logEntry = this.parseLogLine(line, agent, filePath);
           if (logEntry) {
             await this.logsService.ingestLog(logEntry);
+            console.log(`📖 [DEBUG] Emitting 'log-entry' for: ${logEntry.message.substring(0, 80)}`);
             this.emit('log-entry', logEntry);
           }
         }

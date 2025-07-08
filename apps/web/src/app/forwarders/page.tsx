@@ -177,16 +177,18 @@ export default function ForwardersPage() {
     testConnectionMutation.mutate({ host, port, protocol });
   };
 
-  const handleDelete = (id: string) => {
-    console.log('Delete clicked for forwarder ID:', id);
+  const handleDelete = (id: string | undefined) => {
+    if (!id) {
+      console.error('Attempted to delete forwarder with missing id');
+      showNotification('error', 'Cannot delete forwarder: missing id');
+      return;
+    }
     if (confirm('Are you sure you want to delete this forwarder?')) {
-      console.log('Delete confirmed, calling mutation...');
       deleteMutation.mutate(id);
     }
   };
 
   const handleEdit = (forwarder: SyslogForwarder) => {
-    console.log('Edit clicked for forwarder:', forwarder);
     setSelectedForwarder(forwarder);
     setIsEditDialogOpen(true);
   };
@@ -288,7 +290,11 @@ export default function ForwardersPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {forwarders.map((forwarder) => {
+          {forwarders.filter(f => !!f.id).map((forwarder) => {
+            if (!forwarder.id) {
+              console.warn('Skipping forwarder with missing id:', forwarder);
+              return null;
+            }
             const testResult = getTestResult(forwarder.host, forwarder.port, forwarder.protocol);
             
             return (
