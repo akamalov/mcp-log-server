@@ -96,24 +96,24 @@ export default function EnhancedAnalyticsPage() {
     }
   };
 
+  // Dedicated effect for interval management
   useEffect(() => {
-    setModeSwitching(true);
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-      console.log('Interval cleared on mode change');
-    }
     if (mode === 'live') {
-      fetchEnhancedAnalytics();
-      intervalRef.current = setInterval(() => {
+      if (!intervalRef.current) {
         fetchEnhancedAnalytics();
-        console.log('Live interval tick');
-      }, 5000);
-      console.log('Interval created for Live mode');
-    } else if (mode === 'manual') {
-      fetchEnhancedAnalytics();
+        intervalRef.current = setInterval(() => {
+          fetchEnhancedAnalytics();
+          console.log('Live interval tick');
+        }, 5000);
+        console.log('Interval created for Live mode');
+      }
+    } else {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+        console.log('Interval cleared because mode is not live');
+      }
     }
-    setModeSwitching(false);
     return () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
@@ -121,6 +121,15 @@ export default function EnhancedAnalyticsPage() {
         console.log('Interval cleared on unmount');
       }
     };
+  }, [mode]);
+
+  // Fetch analytics data once on mode or time range change
+  useEffect(() => {
+    if (mode === 'manual') {
+      fetchEnhancedAnalytics();
+    } else if (mode === 'live') {
+      fetchEnhancedAnalytics();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, selectedTimeRange]);
 
