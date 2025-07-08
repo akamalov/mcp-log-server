@@ -73,6 +73,7 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
 
   // Initialize syslog forwarder service
   const syslogForwarderService = new SyslogForwarderService(logger);
+  await syslogForwarderService.initialize();
   logger.info('✅ Syslog forwarder service initialized');
 
   // Initialize log watcher service
@@ -1459,18 +1460,14 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
   fastify.get('/api/syslog/forwarders', {
     schema: {
       description: 'Get all syslog forwarders',
-      tags: ['Syslog'],
-      response: {
-        200: {
-          type: 'array',
-          items: { type: 'object' }
-        }
-      }
+      tags: ['Syslog']
     }
   }, async (request, reply) => {
     try {
       const forwarders = syslogForwarderService.getForwarders();
-      return reply.send(forwarders);
+      console.log('API handler forwarders:', forwarders);
+      console.log('API handler forwarders JSON:', JSON.stringify(forwarders));
+      return reply.send(forwarders.map(f => JSON.parse(JSON.stringify(f))));
     } catch (error) {
       logger.error('Failed to get syslog forwarders:', error);
       return reply.status(500).send({ error: 'Failed to get syslog forwarders' });
@@ -1544,23 +1541,8 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
     }
   }, async (request, reply) => {
     try {
-      const forwarderData = request.body as any;
-      
-      // Set defaults
-      const config = {
-        name: forwarderData.name,
-        host: forwarderData.host,
-        port: forwarderData.port,
-        protocol: forwarderData.protocol,
-        facility: forwarderData.facility ?? 16, // local use
-        severity: forwarderData.severity ?? 'info',
-        format: forwarderData.format ?? 'rfc5424',
-        enabled: forwarderData.enabled ?? true,
-        filters: forwarderData.filters,
-        metadata: forwarderData.metadata
-      };
-      
-      const forwarder = await syslogForwarderService.addForwarder(config);
+      const forwarderData = request.body as Partial<Omit<SyslogForwarderConfig, 'id' | 'createdAt' | 'updatedAt'>>;
+      const forwarder = await syslogForwarderService.addForwarder(forwarderData);
       return reply.status(201).send(forwarder);
     } catch (error) {
       logger.error('Failed to create syslog forwarder:', error);

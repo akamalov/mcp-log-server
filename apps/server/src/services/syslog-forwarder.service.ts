@@ -3,6 +3,11 @@ import net from 'net';
 import tls from 'tls';
 import { EventEmitter } from 'events';
 import type { Logger } from '../logger.js';
+import { promises as fs } from 'fs';
+import path from 'path';
+
+const DATA_DIR = path.join(process.cwd(), '.data');
+const STORAGE_PATH = path.join(DATA_DIR, 'syslog-forwarders.json');
 
 export interface SyslogForwarderConfig {
   id: string;
@@ -47,16 +52,85 @@ export class SyslogForwarderService extends EventEmitter {
     this.logger = logger;
   }
 
+  async initialize(): Promise<void> {
+    try {
+      await fs.mkdir(DATA_DIR, { recursive: true });
+      await this.loadForwarders();
+    } catch (error) {
+      this.logger.error('Failed to initialize syslog forwarder storage', { error });
+    }
+  }
+
+  private async loadForwarders(): Promise<void> {
+    try {
+      const data = await fs.readFile(STORAGE_PATH, 'utf-8');
+      const forwarders = JSON.parse(data);
+      // Defensive: ensure all values are plain objects
+      this.forwarders = new Map(
+        forwarders.map(([id, obj]: [string, any]) => [id, { ...obj }])
+      );
+      console.log('Loaded forwarders:', Array.from(this.forwarders.entries()));
+      console.log('Forwarders values:', Array.from(this.forwarders.values()));
+      this.logger.info(`Loaded ${this.forwarders.size} syslog forwarders from storage.`);
+      for (const forwarder of this.forwarders.values()) {
+        if (forwarder.enabled) {
+          this.initializeConnection(forwarder).catch(error => {
+            this.logger.error('Failed to initialize connection for loaded forwarder', { forwarderId: forwarder.id, error });
+          });
+        }
+      }
+    } catch (error: any) {
+      if (error.code === 'ENOENT') {
+        this.logger.info('No syslog forwarders storage file found, starting fresh.');
+      } else {
+        throw error;
+      }
+    }
+  }
+
+  private async saveForwarders(): Promise<void> {
+    const tempPath = `${STORAGE_PATH}.${Date.now()}.tmp`;
+    try {
+      this.logger.info('Attempting to save syslog forwarders to storage.');
+      const data = JSON.stringify(Array.from(this.forwarders.entries()), null, 2);
+      await fs.writeFile(tempPath, data, 'utf-8');
+      await fs.rename(tempPath, STORAGE_PATH);
+      this.logger.info(`Successfully saved ${this.forwarders.size} syslog forwarders.`);
+    } catch (error) {
+      this.logger.error('Failed to save syslog forwarders to storage', { error });
+      // Attempt to clean up the temporary file if it exists
+      try {
+        await fs.unlink(tempPath);
+      } catch (cleanupError) {
+        // Ignore cleanup errors
+      }
+      throw error;
+    }
+  }
+
   /**
    * Add a new syslog forwarder configuration
    */
-  async addForwarder(config: Omit<SyslogForwarderConfig, 'id' | 'createdAt' | 'updatedAt'>): Promise<SyslogForwarderConfig> {
+  async addForwarder(configData: Partial<Omit<SyslogForwarderConfig, 'id' | 'createdAt' | 'updatedAt'>>): Promise<SyslogForwarderConfig> {
     const forwarder: SyslogForwarderConfig = {
-      ...config,
       id: `forwarder-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      name: configData.name || 'Unnamed Forwarder',
+      host: configData.host || '',
+      port: configData.port || 514,
+      protocol: configData.protocol || 'udp',
+      facility: configData.facility ?? 16,
+      severity: configData.severity || 'info',
+      format: configData.format || 'rfc5424',
+      enabled: configData.enabled ?? true,
+      filters: configData.filters || { agents: [], levels: [], messagePatterns: [] },
+      metadata: configData.metadata || { tag: '', hostname: '', appName: '' },
       createdAt: new Date(),
       updatedAt: new Date(),
     };
+
+    if (!forwarder.host || !forwarder.name) {
+      throw new Error('Host and name are required fields for a syslog forwarder.');
+    }
 
     this.forwarders.set(forwarder.id, forwarder);
     
@@ -73,6 +147,7 @@ export class SyslogForwarderService extends EventEmitter {
     });
 
     this.emit('forwarder-added', forwarder);
+    await this.saveForwarders();
     return forwarder;
   }
 
@@ -105,6 +180,7 @@ export class SyslogForwarderService extends EventEmitter {
 
     this.logger.info('Syslog forwarder updated', { id, name: updatedForwarder.name });
     this.emit('forwarder-updated', updatedForwarder);
+    await this.saveForwarders();
     return updatedForwarder;
   }
 
@@ -112,17 +188,26 @@ export class SyslogForwarderService extends EventEmitter {
    * Remove a forwarder configuration
    */
   async removeForwarder(id: string): Promise<boolean> {
+    this.logger.info(`Attempting to remove syslog forwarder with ID: ${id}`);
     const forwarder = this.forwarders.get(id);
     if (!forwarder) {
+      this.logger.warn(`Syslog forwarder with ID: ${id} not found for removal.`);
       return false;
     }
 
     await this.closeConnection(id);
-    this.forwarders.delete(id);
-
-    this.logger.info('Syslog forwarder removed', { id, name: forwarder.name });
-    this.emit('forwarder-removed', id);
-    return true;
+    const deleted = this.forwarders.delete(id);
+    
+    if (deleted) {
+      this.logger.info(`Successfully deleted forwarder ${id} from in-memory map.`);
+      await this.saveForwarders();
+      this.logger.info(`Successfully removed syslog forwarder ${id}.`);
+      this.emit('forwarder-removed', id);
+    } else {
+      this.logger.warn(`Failed to delete forwarder ${id} from in-memory map.`);
+    }
+    
+    return deleted;
   }
 
   /**
