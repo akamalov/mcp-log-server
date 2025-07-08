@@ -538,6 +538,15 @@ export default function EnhancedAnalyticsPage() {
     </div>
   );
 
+  const killAllIntervals = () => {
+    for (let i = 1; i < 1000000; i++) {
+      clearInterval(i);
+    }
+    if (intervalRef.current) intervalRef.current = null;
+    if (typeof window !== 'undefined') window.__enhancedLogIntervalId = null;
+    console.log('All intervals killed by debug button');
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-8">
@@ -555,8 +564,13 @@ export default function EnhancedAnalyticsPage() {
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-8">
       <div className="max-w-7xl mx-auto">
         {/* Debug Panel */}
-        <div className="mb-4 p-2 bg-yellow-100 border border-yellow-400 text-yellow-800 rounded text-xs">
-          <strong>Debug:</strong> mode = {mode}, intervalRef.current = {String(intervalRef.current)}, window.__enhancedLogIntervalId = {String(typeof window !== 'undefined' ? window.__enhancedLogIntervalId : 'N/A')}
+        <div className="mb-4 p-2 bg-yellow-100 border border-yellow-400 text-yellow-800 rounded text-xs flex items-center gap-4">
+          <div>
+            <strong>Debug:</strong> mode = {mode}, intervalRef.current = {String(intervalRef.current)}, window.__enhancedLogIntervalId = {String(typeof window !== 'undefined' ? window.__enhancedLogIntervalId : 'N/A')}
+          </div>
+          <button className="ml-2 px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700" onClick={killAllIntervals}>
+            Kill All Intervals
+          </button>
         </div>
         {/* Header */}
         <div className="mb-8">
