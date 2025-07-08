@@ -400,7 +400,7 @@ export default function DashboardBuilder({
           <div 
             key={widget.id}
             style={containerStyle}
-            className={`relative group ${selectedWidget === widget.id ? 'ring-2 ring-blue-500' : ''} bg-white dark:bg-gray-800 rounded-lg shadow`}
+            className={`relative group ${selectedWidget === widget.id ? 'ring-2 ring-blue-500' : ''} bg-gray-800 rounded-lg shadow`}
             onClick={() => setSelectedWidget(widget.id)}
           >
             {isEditing && (
@@ -446,7 +446,7 @@ export default function DashboardBuilder({
           <div 
             key={widget.id}
             style={containerStyle}
-            className={`bg-white dark:bg-gray-800 rounded-lg shadow p-4 relative group ${selectedWidget === widget.id ? 'ring-2 ring-blue-500' : ''}`}
+            className={`bg-gray-800 rounded-lg shadow p-4 relative group ${selectedWidget === widget.id ? 'ring-2 ring-blue-500' : ''}`}
             onClick={() => setSelectedWidget(widget.id)}
           >
             {isEditing && (
@@ -502,7 +502,7 @@ export default function DashboardBuilder({
           <div 
             key={widget.id}
             style={containerStyle}
-            className={`bg-white dark:bg-gray-800 rounded-lg shadow p-4 relative group ${selectedWidget === widget.id ? 'ring-2 ring-blue-500' : ''}`}
+            className={`bg-gray-800 rounded-lg shadow p-4 relative group ${selectedWidget === widget.id ? 'ring-2 ring-blue-500' : ''}`}
             onClick={() => setSelectedWidget(widget.id)}
           >
             {isEditing && (
@@ -550,7 +550,7 @@ export default function DashboardBuilder({
           <div 
             key={widget.id}
             style={containerStyle}
-            className={`bg-white dark:bg-gray-800 rounded-lg shadow p-4 relative group ${selectedWidget === widget.id ? 'ring-2 ring-blue-500' : ''}`}
+            className={`bg-gray-800 rounded-lg shadow p-4 relative group ${selectedWidget === widget.id ? 'ring-2 ring-blue-500' : ''}`}
             onClick={() => setSelectedWidget(widget.id)}
           >
             {isEditing && (
@@ -637,15 +637,15 @@ export default function DashboardBuilder({
   };
 
   return (
-    <div className="bg-gray-50 dark:bg-gray-900 min-h-screen">
+    <div>
       {/* Header */}
-      <div className="bg-white dark:bg-gray-800 shadow-sm border-b dark:border-gray-700 p-4">
+      <header className="mb-8">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <Layout className="w-6 h-6 text-blue-600" />
             <div>
-              <h1 className="text-xl font-bold text-gray-900 dark:text-white">Dashboard Builder</h1>
-              <p className="text-sm text-gray-600 dark:text-gray-300">Create and customize your analytics dashboard</p>
+              <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Dashboard Builder</h1>
+              <p className="text-gray-600 dark:text-gray-300 mt-2">Create and customize your analytics dashboard</p>
             </div>
           </div>
 
@@ -699,10 +699,10 @@ export default function DashboardBuilder({
             )}
           </div>
         </div>
-      </div>
+      </header>
 
       {/* Dashboard Content */}
-      <div className="p-6">
+      <div>
         {dashboard.widgets.length === 0 ? (
           <div className="text-center py-12">
             <Layout className="w-16 h-16 text-gray-400 dark:text-gray-500 mx-auto mb-4" />

@@ -346,22 +346,22 @@ export default function InteractiveAnalyticsChart({
   const { totalCount, avgCount, trend } = getMetricSummary();
 
   return (
-    <div className="bg-white rounded-lg shadow-lg p-6">
+    <div className="rounded-lg p-6">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-4">
-          <h2 className="text-xl font-bold text-gray-900">{drillDownState.title}</h2>
+          <h2 className="text-xl font-bold text-white">{drillDownState.title}</h2>
           {showControls && (
             <div className="flex items-center gap-2">
               <button
                 onClick={() => onExport && onExport(processedData)}
-                className="p-2 text-gray-600 hover:text-blue-600 rounded-lg hover:bg-gray-100"
+                className="p-2 text-gray-300 hover:text-blue-400 rounded-lg hover:bg-gray-700"
                 title="Export Chart Data"
               >
                 <Download className="w-4 h-4" />
               </button>
               <button
-                className="p-2 text-gray-600 hover:text-blue-600 rounded-lg hover:bg-gray-100"
+                className="p-2 text-gray-300 hover:text-blue-400 rounded-lg hover:bg-gray-700"
                 title="Chart Settings"
               >
                 <Settings className="w-4 h-4" />
@@ -374,12 +374,12 @@ export default function InteractiveAnalyticsChart({
         <div className="flex items-center gap-6 text-sm">
           <div className="flex items-center gap-2">
             <Activity className="w-4 h-4 text-blue-600" />
-            <span className="text-gray-600">Total:</span>
-            <span className="font-bold text-gray-900">{totalCount.toLocaleString()}</span>
+            <span className="text-gray-300">Total:</span>
+            <span className="font-bold text-white">{totalCount.toLocaleString()}</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-gray-600">Avg:</span>
-            <span className="font-bold text-gray-900">{avgCount.toFixed(1)}</span>
+            <span className="text-gray-300">Avg:</span>
+            <span className="font-bold text-white">{avgCount.toFixed(1)}</span>
           </div>
           <div className="flex items-center gap-2">
             {trend > 0 ? (
@@ -387,10 +387,10 @@ export default function InteractiveAnalyticsChart({
             ) : trend < 0 ? (
               <TrendingDown className="w-4 h-4 text-red-600" />
             ) : (
-              <Activity className="w-4 h-4 text-gray-600" />
+              <Activity className="w-4 h-4 text-gray-300" />
             )}
-            <span className="text-gray-600">Trend:</span>
-            <span className={`font-bold ${trend > 0 ? 'text-green-600' : trend < 0 ? 'text-red-600' : 'text-gray-600'}`}>
+            <span className="text-gray-300">Trend:</span>
+            <span className={`font-bold ${trend > 0 ? 'text-green-400' : trend < 0 ? 'text-red-400' : 'text-gray-300'}`}>
               {trend > 0 ? '+' : ''}{trend}
             </span>
           </div>
@@ -425,19 +425,19 @@ export default function InteractiveAnalyticsChart({
 
       {/* Data Summary */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6 pt-4 border-t">
-        <div className="bg-blue-50 p-4 rounded-lg">
-          <h4 className="font-medium text-blue-900 mb-2">Data Points</h4>
-          <p className="text-2xl font-bold text-blue-600">{processedData.length}</p>
+        <div className="bg-blue-900/20 p-4 rounded-lg">
+          <h4 className="font-medium text-blue-300 mb-2">Data Points</h4>
+          <p className="text-2xl font-bold text-blue-400">{processedData.length}</p>
         </div>
-        <div className="bg-green-50 p-4 rounded-lg">
-          <h4 className="font-medium text-green-900 mb-2">Peak Value</h4>
-          <p className="text-2xl font-bold text-green-600">
+        <div className="bg-green-900/20 p-4 rounded-lg">
+          <h4 className="font-medium text-green-300 mb-2">Peak Value</h4>
+          <p className="text-2xl font-bold text-green-400">
             {Math.max(...processedData.map((item: any) => item.count || item.value || 0))}
           </p>
         </div>
-        <div className="bg-purple-50 p-4 rounded-lg">
-          <h4 className="font-medium text-purple-900 mb-2">Time Range</h4>
-          <p className="text-sm font-medium text-purple-600">
+        <div className="bg-purple-900/20 p-4 rounded-lg">
+          <h4 className="font-medium text-purple-300 mb-2">Time Range</h4>
+          <p className="text-sm font-medium text-purple-400">
             {processedData.length > 0 ? `${processedData.length} periods` : 'No data'}
           </p>
         </div>
