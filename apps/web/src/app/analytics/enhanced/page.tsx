@@ -571,20 +571,25 @@ export default function EnhancedAnalyticsPage() {
           
           <div className="flex items-center space-x-2">
             <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Mode:</label>
-            <button
-              className={`px-3 py-1 rounded ${mode === 'live' ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'}`}
-              onClick={() => !modeSwitching && setMode('live')}
-              disabled={modeSwitching}
-            >
-              Go Live
-            </button>
-            <button
-              className={`px-3 py-1 rounded ${mode === 'manual' ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'}`}
-              onClick={() => !modeSwitching && setMode('manual')}
-              disabled={modeSwitching}
-            >
-              Manual Pull
-            </button>
+            {mode === 'live' ? (
+              <>
+                <button
+                  className="px-3 py-1 rounded bg-red-600 text-white hover:bg-red-700"
+                  onClick={() => setMode('manual')}
+                  disabled={modeSwitching}
+                >
+                  Stop
+                </button>
+                <span className="ml-2 px-2 py-1 rounded bg-green-200 text-green-800 text-xs">Live</span>
+              </>
+            ) : (
+              <button
+                className="px-3 py-1 rounded bg-blue-600 text-white"
+                disabled
+              >
+                Manual Pull
+              </button>
+            )}
             {mode === 'manual' && (
               <button
                 className="ml-2 px-3 py-1 rounded bg-green-600 text-white hover:bg-green-700"
@@ -593,9 +598,6 @@ export default function EnhancedAnalyticsPage() {
               >
                 Refresh
               </button>
-            )}
-            {mode === 'live' && (
-              <span className="ml-2 px-2 py-1 rounded bg-green-200 text-green-800 text-xs">Live</span>
             )}
           </div>
           
