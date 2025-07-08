@@ -72,41 +72,81 @@ MCP Log Server is a monitoring and analytics solution that bridges the gap betwe
 - **pnpm** - Fast, disk space efficient package manager
 - **Docker** - Containerized development and deployment
 
-## ✨ Key Features
+## 🚀 Installation (Interactive)
 
-### 🤖 Intelligent Agent Discovery
+The project now includes an **interactive installation script** (`install.sh`) that lets you choose between Native and Docker installation modes:
 
-- **Cross-Platform Detection**: Automatically finds AI agents on Windows, macOS, Linux, and WSL
-- **Supported Agents**: 
-  - Claude CLI and Desktop applications
-  - Cursor editor
-  - VS Code with extensions  
-  - Gemini CLI tools
-  - Custom log sources
-- **WSL Integration**: Smart Windows path mounting for WSL environments
-- **Dynamic Configuration**: Real-time agent discovery with automatic path resolution
+```bash
+chmod +x install.sh
+./install.sh
+```
 
-### 📈 Analytics & Monitoring
+You will be prompted to select:
 
-- **Real-time Dashboards**: Live metrics with agent status monitoring
-- **Log Volume Tracking**: Monitor log ingestion rates and patterns
-- **Agent Health Monitoring**: Track agent availability and performance
-- **Pattern Detection**: Basic log pattern recognition and analysis
-- **Error Rate Monitoring**: Track and alert on error patterns
+- **Native Install**
+  - Installs directly on your system (Node.js, npm, ClickHouse, etc.)
+  - **Pros:** Direct file access, no Docker overhead
+  - **Cons:** Requires dependencies on host, less isolated
+- **Docker Install**
+  - Runs everything in Docker containers (backend, frontend, ClickHouse, etc.)
+  - **Pros:** Fully isolated, easy to deploy, consistent
+  - **Cons:** Needs Docker, host file watching may need extra config
 
-### 🔗 API & Integration
+**Suggestions:**
+- Use Native if you want direct integration with your OS and local files.
+- Use Docker for easy, portable, and production-like deployments.
 
-- **REST API**: Complete RESTful API for agent and log management
-- **WebSocket**: Real-time bidirectional communication for live updates
-- **MCP Protocol**: Basic Model Context Protocol implementation
-- **Custom Agents**: API for adding and managing custom log sources
+---
 
-### 📊 Data Management
+## 🐳 Docker Support
 
-- **Multi-Database Architecture**: Optimized storage for different data types
-- **Log Processing**: Efficient handling of high-volume log ingestion
-- **Search Capabilities**: Elasticsearch-powered log search
-- **Data Export**: Export logs in various formats
+- Full `docker-compose.yml` provided for backend, frontend, and ClickHouse.
+- Example for mounting host log directories for native file watching:
+  ```yaml
+  services:
+    backend:
+      # ...
+      volumes:
+        - ~/.cursor/logs:/host-cursor-logs:ro
+      environment:
+        - CURSOR_LOGS_PATH=/host-cursor-logs
+  ```
+- Environment variable support for log path configuration.
+
+---
+
+## 🔄 Unified Service Management
+
+A single script, `restart-service.sh`, is provided to:
+- Stop all services
+- Verify services have stopped
+- Start all services
+- Verify all services have started
+- Clean up ports and log files
+- Provide robust health checks for backend and frontend
+
+---
+
+## ✨ Key Features (Updated)
+
+### 🛰️ Syslog Forwarder Management
+- Full CRUD (create, read, update, delete) for syslog forwarders via UI and API
+- Supports UDP, TCP, and TCP-TLS protocols
+- Filtering, metadata, and connection testing for forwarders
+- Persistent storage and defensive serialization
+
+### 📺 Enhanced Log Viewer (Updated)
+- Robust mode switching between "Live" (WebSocket) and "Manual Pull" (paginated fetch)
+- Reliable WebSocket disconnect logic
+- Clean, production-ready UI (no debug panels)
+
+---
+
+## 🛠️ Backend Logging & Debugging (New)
+- Debug logs for log watcher and syslog forwarder events
+- Defensive error handling and logging for all major backend services
+
+---
 
 ## 📸 Screenshots
 
@@ -139,220 +179,6 @@ Advanced analytics dashboard with performance metrics and predictive insights.
 ![Enhanced Analytics](docs/images/screenshots/enhanced-analytics.png)
 
 *Features: Response time distribution, throughput analysis, error tracking, and agent activity patterns.*
-
-## 🚀 Quick Start Guide
-
-### Prerequisites
-
-- **Node.js** 20.0+ LTS
-- **pnpm** 9.0+ (package manager)
-- **Docker** & Docker Compose v2
-- **Git**
-- **4GB+ RAM** (recommended for full stack)
-
-### Installation
-
-1. **Clone and setup the repository**
-   ```bash
-   git clone https://github.com/akamalov/mcp-log-server.git
-   cd mcp-log-server
-   pnpm install
-   ```
-
-2. **Start the development environment**
-   ```bash
-   pnpm start
-   ```
-
-The startup script automatically:
-- ✅ Verifies dependencies and starts Docker services
-- 🗄️ Initializes PostgreSQL, ClickHouse, Redis, and Elasticsearch
-- 🚀 Starts the backend server on `http://localhost:3001`
-- 🌐 Launches the web dashboard on `http://localhost:3000`
-- 🔍 Discovers and connects to available AI agents
-- 📊 Begins log collection and monitoring
-
-### First Steps
-
-1. **Access the Dashboard**: Navigate to `http://localhost:3000`
-2. **View Discovered Agents**: See automatically detected agents on the dashboard
-3. **Check Agent Status**: Monitor agent health and activity
-4. **Add Custom Agents**: Use the Agent Management interface (`/agents`)
-5. **Explore Analytics**: Check real-time metrics and log patterns
-6. **Browse Logs**: Use the log viewer at `/logs`
-
-## 🔧 Configuration & Setup
-
-### Environment Configuration
-
-Create a `.env` file in the project root:
-
-```bash
-# ===== Server Configuration =====
-NODE_ENV=development
-SERVER_HOST=localhost
-SERVER_PORT=3001
-FRONTEND_URL=http://localhost:3000
-
-# ===== Database Configuration =====
-# PostgreSQL (Primary Database)
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
-POSTGRES_DB=mcp_log_server
-POSTGRES_USER=mcp_user
-POSTGRES_PASSWORD=mcp_password
-
-# ClickHouse (Analytics Database)
-CLICKHOUSE_HOST=localhost
-CLICKHOUSE_PORT=8123
-CLICKHOUSE_DATABASE=mcp_logs
-CLICKHOUSE_USERNAME=default
-CLICKHOUSE_PASSWORD=
-
-# Redis (Cache & Real-time)
-REDIS_HOST=localhost
-REDIS_PORT=6379
-REDIS_PASSWORD=
-REDIS_DB=0
-
-# Elasticsearch (Search)
-ELASTICSEARCH_HOST=localhost
-ELASTICSEARCH_PORT=9200
-ELASTICSEARCH_USERNAME=
-ELASTICSEARCH_PASSWORD=
-
-# ===== Security Configuration =====
-JWT_SECRET=your-super-secure-jwt-secret-here
-CORS_ORIGIN=http://localhost:3000
-
-# ===== Logging Configuration =====
-LOG_LEVEL=info
-DEBUG_MODE=false
-
-# ===== Feature Flags =====
-ENABLE_ANALYTICS=true
-ENABLE_REAL_TIME_UPDATES=true
-ENABLE_AGENT_DISCOVERY=true
-ENABLE_CUSTOM_AGENTS=true
-```
-
-### Agent Discovery Configuration
-
-The system intelligently discovers agents in platform-specific locations:
-
-**Claude Agents:**
-- **Linux/WSL**: `~/.cache/claude-cli-nodejs/`, `~/.claude/logs/`
-- **macOS**: `~/Library/Logs/Claude/`, `~/Library/Application Support/Claude/`
-- **Windows**: `%APPDATA%\Claude\logs\`, `%LOCALAPPDATA%\Claude\`
-
-**VS Code & Extensions:**
-- **Linux**: `~/.vscode/logs/`, `~/.vscode-server/data/logs/`
-- **macOS**: `~/Library/Application Support/Code/logs/`
-- **Windows**: `%APPDATA%\Code\logs\`
-
-**Cursor Editor:**
-- **Linux**: `~/.cursor/logs/`
-- **macOS**: `~/Library/Application Support/Cursor/logs/`
-- **Windows**: `%APPDATA%\Cursor\logs\`
-
-**Gemini CLI:**
-- **Linux**: `~/.local/share/gemini-cli/projects/`
-- **macOS**: `~/Library/Application Support/Gemini CLI/projects/`
-- **Windows**: `%LOCALAPPDATA%\Gemini CLI\projects\`
-
-## 📚 API Documentation
-
-### REST API Endpoints
-
-#### System Health & Status
-```bash
-GET  /health                          # Server health check
-GET  /api/system/status               # System status information
-```
-
-#### Agent Management
-```bash
-# Agent Discovery & Management
-GET    /api/agents                    # List all discovered agents
-GET    /api/agents/:id                # Get specific agent details
-POST   /api/agents/refresh            # Trigger agent rediscovery
-
-# Custom Agent Configuration
-GET    /api/agents/custom             # List custom agents
-POST   /api/agents/custom             # Create new custom agent
-PUT    /api/agents/custom/:id         # Update custom agent
-DELETE /api/agents/custom/:id         # Delete custom agent
-```
-
-#### Analytics & Monitoring
-```bash
-# Analytics
-GET /api/analytics/summary            # Analytics overview dashboard
-GET /api/analytics/agents             # Per-agent analytics
-GET /api/analytics/patterns           # Detected log patterns
-
-# Log Management
-GET /api/logs                         # Get recent logs with pagination
-GET /api/logs/search                  # Search logs
-```
-
-### WebSocket Real-time API
-
-Connect to `ws://localhost:3001/ws` for real-time updates:
-
-```javascript
-// WebSocket Connection
-const ws = new WebSocket('ws://localhost:3001/ws');
-
-// Event Subscriptions
-ws.send(JSON.stringify({
-  type: 'subscribe',
-  channels: ['logs', 'analytics', 'agents']
-}));
-
-// Event Handlers
-ws.onmessage = (event) => {
-  const data = JSON.parse(event.data);
-  
-  switch(data.type) {
-    case 'log-entry':
-      console.log('New log:', data.payload);
-      break;
-    case 'agent-status':
-      console.log('Agent status change:', data.payload);
-      break;
-    case 'analytics-update':
-      console.log('Analytics update:', data.payload);
-      break;
-  }
-};
-```
-
-## 🎨 Dashboard Features
-
-### Main Dashboard
-- **System Overview**: Real-time metrics for total logs and active agents
-- **Agent Status Grid**: Visual indicators for each agent's health and activity
-- **Log Volume Charts**: Monitor log ingestion rates and trends
-- **Error Rate Monitoring**: Track error patterns and alerts
-- **Quick Navigation**: Fast access to detailed views
-
-### Agent Management Interface
-- **Discovery Dashboard**: View auto-discovered agents with detection details
-- **Custom Agent Setup**: Add and configure custom log sources
-- **Health Monitoring**: Real-time agent connectivity and status
-- **Configuration Management**: Edit agent settings and log paths
-
-### Analytics Dashboard
-- **Pattern Recognition**: Identify recurring log patterns
-- **Performance Metrics**: Monitor response times and throughput
-- **Agent Health Scoring**: Composite health indicators
-- **Log Volume Analysis**: Track ingestion trends and patterns
-
-### Log Explorer
-- **Real-time Stream**: Live log updates with filtering
-- **Search Interface**: Full-text search with date ranges
-- **Export Tools**: Download logs in various formats
 
 ## 🛠️ Development Guide
 
@@ -441,6 +267,97 @@ pnpm build                       # Build all packages
 3. **Shared Features**:
    - Define types in `packages/types/`
    - Add utilities in appropriate packages
+
+## 📚 API Usage Examples
+
+### REST API (with `curl`)
+
+#### **Health Check**
+```bash
+curl http://localhost:3001/health
+```
+
+#### **Get All Agents**
+```bash
+curl http://localhost:3001/api/agents
+```
+
+#### **Search Logs**
+```bash
+curl "http://localhost:3001/api/logs/search?query=error&limit=10"
+```
+
+#### **Create a Syslog Forwarder**
+```bash
+curl -X POST http://localhost:3001/api/syslog/forwarders \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "MySyslogServer",
+    "host": "192.168.1.100",
+    "port": 514,
+    "protocol": "udp",
+    "facility": 16,
+    "severity": "info",
+    "format": "rfc5424",
+    "enabled": true
+  }'
+```
+
+#### **Update a Syslog Forwarder**
+```bash
+curl -X PUT http://localhost:3001/api/syslog/forwarders/<forwarder_id> \
+  -H "Content-Type: application/json" \
+  -d '{"enabled": false}'
+```
+
+#### **Delete a Syslog Forwarder**
+```bash
+curl -X DELETE http://localhost:3001/api/syslog/forwarders/<forwarder_id>
+```
+
+#### **Test Syslog Connection**
+```bash
+curl -X POST http://localhost:3001/api/syslog/test-connection \
+  -H "Content-Type: application/json" \
+  -d '{"host": "192.168.1.100", "port": 514, "protocol": "udp"}'
+```
+
+---
+
+### WebSocket API
+
+#### **Connect and Subscribe (JavaScript Example)**
+```js
+const ws = new WebSocket('ws://localhost:3001/ws');
+ws.onopen = () => {
+  ws.send(JSON.stringify({
+    type: 'subscribe',
+    channels: ['logs', 'analytics', 'agents']
+  }));
+};
+ws.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  if (data.type === 'log-entry') {
+    console.log('New log:', data.data);
+  }
+};
+```
+
+#### **Ping/Pong Keepalive**
+The server may send `{"type":"ping"}` messages. Respond with:
+```js
+ws.send(JSON.stringify({ type: 'pong', timestamp: new Date().toISOString() }));
+```
+
+#### **Sample WebSocket Message Types**
+- `log-entry`: New log line (real-time)
+- `analytics-update`: Analytics dashboard update
+- `agent-status`: Agent status change
+- `pattern-alert`: Pattern detection alert
+
+---
+
+**For a full list of endpoints and payloads, see the [API Documentation section above](#api-documentation).**
 
 ## 🚀 Deployment
 

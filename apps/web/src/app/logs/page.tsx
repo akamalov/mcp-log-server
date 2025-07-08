@@ -70,7 +70,7 @@ export default function LogViewer() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTER_STATE);
   const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [selectedLog, setSelectedLog] = useState<LogEntry | null>(null);
@@ -82,6 +82,7 @@ export default function LogViewer() {
   const [isClient, setIsClient] = useState(false);
   const [isLiveMode, setIsLiveMode] = useState(false);
   const [liveLogCount, setLiveLogCount] = useState(0);
+  const [fetchTrigger, setFetchTrigger] = useState(0);
 
   useEffect(() => {
     setIsClient(true);
@@ -111,10 +112,10 @@ export default function LogViewer() {
     fetchAgents();
   }, [isClient]);
 
-  // Reset to page 1 when filters or page size change
+  // Reset to page 1 when page size changes
   useEffect(() => {
     setPage(1);
-  }, [filters, pageSize]);
+  }, [pageSize]);
 
   // Validate regex when regex mode is enabled
   useEffect(() => {
@@ -129,6 +130,11 @@ export default function LogViewer() {
       setRegexError(null);
     }
   }, [filters.search, filters.useRegex]);
+
+  const handleManualFetch = useCallback(() => {
+    setPage(1);
+    setFetchTrigger(c => c + 1);
+  }, []);
 
   // Apply quick filters
   const applyQuickFilter = useCallback((type: string) => {
@@ -200,7 +206,6 @@ export default function LogViewer() {
     if (message.type === 'log-entry' && message.data) {
       const newLog = message.data;
       
-      // Apply filters to determine if this log should be shown
       const matchesSearch = !filters.search || 
         newLog.message?.toLowerCase().includes(filters.search.toLowerCase()) ||
         newLog.source?.toLowerCase().includes(filters.search.toLowerCase());
@@ -210,7 +215,6 @@ export default function LogViewer() {
       
       if (matchesSearch && matchesLevel && matchesSource) {
         setLogs(prevLogs => {
-          // Add new log to the beginning and keep only pageSize logs for performance
           const updated = [newLog, ...prevLogs].slice(0, pageSize * 2);
           return updated;
         });
@@ -231,21 +235,10 @@ export default function LogViewer() {
     console.warn('⚠️ Live log stream connection failed:', error);
   }, []);
 
-  // Toggle live mode
-  const toggleLiveMode = useCallback(() => {
-    setIsLiveMode(prev => {
-      const newLiveMode = !prev;
-      if (newLiveMode) {
-        setLiveLogCount(0); // Reset count when enabling
-        setPage(1); // Reset to first page
-      }
-      return newLiveMode;
-    });
-  }, []);
-
   // WebSocket connection for live logs
-  const { isConnected, isConnecting } = useWebSocket({
+  const { isConnected, isConnecting, disconnect } = useWebSocket({
     url: getWebSocketUrl('/ws/logs'),
+    enabled: isLiveMode,
     onMessage: handleWebSocketMessage,
     onConnect: handleWebSocketConnect,
     onDisconnect: handleWebSocketDisconnect,
@@ -255,13 +248,74 @@ export default function LogViewer() {
     reconnectInterval: 3000
   });
 
+  // Toggle live mode with explicit disconnect
+  const toggleLiveMode = useCallback(() => {
+    setIsLiveMode(prev => {
+      const newLiveMode = !prev;
+      if (!newLiveMode) {
+        disconnect();
+      } else {
+        setLiveLogCount(0);
+        setPage(1);
+        // Fetch latest logs when entering live mode
+        (async () => {
+          try {
+            const params = new URLSearchParams();
+            if (filters.search) {
+              if (filters.useRegex && !regexError) {
+                params.append('searchRegex', filters.search);
+              } else if (!filters.useRegex) {
+                params.append('search', filters.search);
+              }
+            }
+            if (filters.levels.length > 0) {
+              params.append('levels', filters.levels.join(','));
+            }
+            if (filters.sources.length > 0) {
+              params.append('sources', filters.sources.join(','));
+            }
+            if (filters.timeRange.start) {
+              params.append('from', filters.timeRange.start);
+            }
+            if (filters.timeRange.end) {
+              params.append('to', filters.timeRange.end);
+            }
+            params.append('limit', pageSize.toString());
+            params.append('offset', '0');
+            const res = await fetch(`${config.backendUrl}/api/logs?${params.toString()}`);
+            if (!res.ok) throw new Error(`API returned status ${res.status}`);
+            const data = await res.json();
+            const logs = Array.isArray(data) ? data : [];
+            setLogs(logs);
+          } catch (e) {
+            setLogs([]);
+          }
+        })();
+      }
+      return newLiveMode;
+    });
+  }, [disconnect, filters, regexError, pageSize]);
+
+  useEffect(() => {
+    if (!isLiveMode && isConnected) {
+      disconnect();
+      console.log('WebSocket disconnected due to isLiveMode=false');
+    }
+  }, [isLiveMode, isConnected, disconnect]);
+
   // Fetch logs with filters and pagination
   useEffect(() => {
     if (!isClient) return;
     
-    // Skip fetching in live mode - logs come from WebSocket
     if (isLiveMode) {
       setLoading(false);
+      return;
+    }
+
+    if (fetchTrigger === 0) {
+      setLoading(false);
+      setLogs([]);
+      setHasMore(false);
       return;
     }
     
@@ -271,7 +325,6 @@ export default function LogViewer() {
       try {
         const params = new URLSearchParams();
         
-        // Handle search with regex support
         if (filters.search) {
           if (filters.useRegex && !regexError) {
             params.append('searchRegex', filters.search);
@@ -280,17 +333,14 @@ export default function LogViewer() {
           }
         }
         
-        // Apply level filters
         if (filters.levels.length > 0) {
           params.append('levels', filters.levels.join(','));
         }
         
-        // Apply source filters
         if (filters.sources.length > 0) {
           params.append('sources', filters.sources.join(','));
         }
         
-        // Apply time range filters
         if (filters.timeRange.start) {
           params.append('from', filters.timeRange.start);
         }
@@ -318,13 +368,17 @@ export default function LogViewer() {
       }
     }
 
+    if (filters.useRegex && regexError) {
+      return;
+    }
+
     fetchLogs();
-  }, [isClient, filters, page, pageSize, regexError, isLiveMode]);
+  }, [isClient, page, pageSize, regexError, isLiveMode, fetchTrigger]);
 
   // Export filtered logs
   const exportLogs = useCallback(async () => {
     try {
-      const body: any = { limit: 10000 }; // Export more logs
+      const body: any = { limit: 10000 };
       
       if (filters.search) {
         if (filters.useRegex && !regexError) {
@@ -341,7 +395,7 @@ export default function LogViewer() {
       
       const params = new URLSearchParams();
       if (body.query) params.append('search', body.query);
-      params.append('limit', '10000'); // Large limit for export
+      params.append('limit', '10000');
       if (body.levels) params.append('levels', body.levels.join(','));
       if (body.sources) params.append('sources', body.sources.join(','));
       if (body.from) params.append('from', body.from);
@@ -394,7 +448,6 @@ export default function LogViewer() {
             <p className="text-gray-600 dark:text-gray-300 mt-2">Advanced log filtering with regex support</p>
           </div>
           <div className="flex items-center gap-2">
-            {/* Live Mode Status Indicator */}
             <div className="flex items-center gap-2 px-3 py-2 bg-gray-100 dark:bg-gray-800 rounded-lg text-sm">
               {isConnected && isLiveMode ? (
                 <>
@@ -419,12 +472,11 @@ export default function LogViewer() {
               ) : (
                 <>
                   <Pause className="w-4 h-4 text-gray-500" />
-                  <span className="text-gray-600 dark:text-gray-400">Static</span>
+                  <span className="text-gray-600 dark:text-gray-400">Manual Pull</span>
                 </>
               )}
             </div>
 
-            {/* Live Mode Toggle */}
             <button
               onClick={toggleLiveMode}
               className={`px-4 py-2 rounded-lg flex items-center gap-2 transition-colors ${
@@ -457,7 +509,6 @@ export default function LogViewer() {
         </div>
       </header>
 
-      {/* Quick Filter Bar */}
       <div className="mb-6 flex flex-wrap gap-2">
         <button
           onClick={() => applyQuickFilter('errors-only')}
@@ -492,10 +543,8 @@ export default function LogViewer() {
         </button>
       </div>
 
-      {/* Main Search and Filter Toggle */}
       <section className="mb-6 bg-white dark:bg-gray-800 rounded-lg shadow p-4">
         <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center">
-          {/* Search Input */}
           <div className="flex-1 relative">
             <div className="relative flex items-center">
               <div className="absolute left-3 pointer-events-none z-10">
@@ -531,7 +580,6 @@ export default function LogViewer() {
             )}
           </div>
 
-          {/* Filter Toggle */}
           <button
             onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
             className={`px-4 py-2 rounded-lg border flex items-center gap-2 ${
@@ -549,13 +597,22 @@ export default function LogViewer() {
             )}
             {showAdvancedFilters ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
           </button>
+
+          {!isLiveMode && (
+            <button
+              onClick={handleManualFetch}
+              disabled={loading}
+              className="px-4 py-2 rounded-lg bg-indigo-600 text-white flex items-center gap-2 hover:bg-indigo-700 disabled:opacity-50"
+            >
+              <Search className="w-4 h-4" />
+              Fetch Logs
+            </button>
+          )}
         </div>
 
-        {/* Advanced Filters Panel */}
         {showAdvancedFilters && (
           <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
             <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-              {/* Log Levels */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Log Levels
@@ -592,7 +649,6 @@ export default function LogViewer() {
                 </div>
               </div>
 
-              {/* Sources/Agents */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Sources/Agents
@@ -632,7 +688,6 @@ export default function LogViewer() {
                 </div>
               </div>
 
-              {/* Time Range */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   <Calendar className="inline w-4 h-4 mr-1" />
@@ -642,8 +697,8 @@ export default function LogViewer() {
                   <input
                     type="datetime-local"
                     value={filters.timeRange.start}
-                    onChange={e => setFilters(prev => ({ 
-                      ...prev, 
+                    onChange={e => setFilters(prev => ({
+                      ...prev,
                       timeRange: { ...prev.timeRange, start: e.target.value }
                     }))}
                     className="w-full px-3 py-2 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
@@ -652,8 +707,8 @@ export default function LogViewer() {
                   <input
                     type="datetime-local"
                     value={filters.timeRange.end}
-                    onChange={e => setFilters(prev => ({ 
-                      ...prev, 
+                    onChange={e => setFilters(prev => ({
+                      ...prev,
                       timeRange: { ...prev.timeRange, end: e.target.value }
                     }))}
                     className="w-full px-3 py-2 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
@@ -663,7 +718,6 @@ export default function LogViewer() {
               </div>
             </div>
 
-            {/* Filter Presets */}
             <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
               <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
                 <div className="flex-1">
@@ -710,9 +764,7 @@ export default function LogViewer() {
         )}
       </section>
 
-      {/* Split Pane Layout */}
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
-        {/* Top Pane - Log Table */}
         <div className={`${selectedLog ? 'h-80' : 'h-96'} flex flex-col ${selectedLog ? 'border-b border-gray-200 dark:border-gray-700' : ''}`}>
           {loading ? (
             <div className="h-full flex items-center justify-center text-gray-400 dark:text-gray-500">Loading logs...</div>
@@ -728,10 +780,24 @@ export default function LogViewer() {
           ) : logs.length === 0 ? (
             <div className="h-full flex items-center justify-center text-gray-400 dark:text-gray-500 text-center">
               <div>
-                <p>No logs found matching your filters.</p>
+                {fetchTrigger === 0 && !isLiveMode ? (
+                  <div>
+                    <p className="mb-4">Click the button to fetch logs based on your current filters.</p>
+                    <button
+                      onClick={handleManualFetch}
+                      disabled={loading}
+                      className="px-6 py-3 rounded-lg bg-indigo-600 text-white flex items-center gap-2 hover:bg-indigo-700 disabled:opacity-50 mx-auto"
+                    >
+                      <Search className="w-5 h-5" />
+                      Fetch Logs
+                    </button>
+                  </div>
+                ) : (
+                  <p>No logs found matching your filters.</p>
+                )}
                 <button
                   onClick={resetFilters}
-                  className="mt-2 text-blue-600 hover:text-blue-800 text-sm underline"
+                  className="mt-4 text-blue-600 hover:text-blue-800 text-sm underline"
                 >
                   Clear all filters
                 </button>
@@ -818,7 +884,6 @@ export default function LogViewer() {
                 </div>
               </div>
               
-              {/* Pagination */}
               <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-gray-50 dark:bg-gray-800">
                 <div className="flex items-center gap-4">
                   <div className="text-sm text-gray-500 dark:text-gray-400">
@@ -860,10 +925,8 @@ export default function LogViewer() {
           )}
         </div>
 
-        {/* Bottom Pane - Log Details */}
         {selectedLog && (
           <div className="h-80 flex flex-col bg-white dark:bg-gray-800">
-            {/* Details Header */}
             <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Log Details</h3>
               <button
@@ -875,7 +938,6 @@ export default function LogViewer() {
               </button>
             </div>
             
-            {/* Details Content */}
             <div className="flex-1 overflow-auto p-4 bg-white dark:bg-gray-800">
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="space-y-4 min-w-0">
