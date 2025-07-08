@@ -1,7 +1,8 @@
 "use client";
 import React, { useEffect, useState, useCallback, useMemo } from "react";
-import { Search, Filter, Calendar, Regex, Save, RotateCcw, ChevronDown, ChevronUp, X, Download } from "lucide-react";
-import { config } from '@/lib/config';
+import { Search, Filter, Calendar, Regex, Save, RotateCcw, ChevronDown, ChevronUp, X, Download, Play, Pause, Wifi, WifiOff } from "lucide-react";
+import { config, getWebSocketUrl } from '@/lib/config';
+import { useWebSocket } from '@/hooks/useWebSocket';
 
 type LogEntry = {
   id: string;
@@ -79,6 +80,8 @@ export default function LogViewer() {
   const [regexError, setRegexError] = useState<string | null>(null);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [isClient, setIsClient] = useState(false);
+  const [isLiveMode, setIsLiveMode] = useState(false);
+  const [liveLogCount, setLiveLogCount] = useState(0);
 
   useEffect(() => {
     setIsClient(true);
@@ -192,9 +195,76 @@ export default function LogViewer() {
     setFilters(DEFAULT_FILTER_STATE);
   }, []);
 
+  // WebSocket handlers for live mode
+  const handleWebSocketMessage = useCallback((message: any) => {
+    if (message.type === 'log-entry' && message.data) {
+      const newLog = message.data;
+      
+      // Apply filters to determine if this log should be shown
+      const matchesSearch = !filters.search || 
+        newLog.message?.toLowerCase().includes(filters.search.toLowerCase()) ||
+        newLog.source?.toLowerCase().includes(filters.search.toLowerCase());
+      
+      const matchesLevel = filters.levels.length === 0 || filters.levels.includes(newLog.level);
+      const matchesSource = filters.sources.length === 0 || filters.sources.includes(newLog.source);
+      
+      if (matchesSearch && matchesLevel && matchesSource) {
+        setLogs(prevLogs => {
+          // Add new log to the beginning and keep only pageSize logs for performance
+          const updated = [newLog, ...prevLogs].slice(0, pageSize * 2);
+          return updated;
+        });
+        setLiveLogCount(prev => prev + 1);
+      }
+    }
+  }, [filters.search, filters.levels, filters.sources, pageSize]);
+
+  const handleWebSocketConnect = useCallback(() => {
+    console.log('📡 Connected to live log stream');
+  }, []);
+
+  const handleWebSocketDisconnect = useCallback(() => {
+    console.log('📡 Disconnected from live log stream');
+  }, []);
+
+  const handleWebSocketError = useCallback((error: any) => {
+    console.warn('⚠️ Live log stream connection failed:', error);
+  }, []);
+
+  // Toggle live mode
+  const toggleLiveMode = useCallback(() => {
+    setIsLiveMode(prev => {
+      const newLiveMode = !prev;
+      if (newLiveMode) {
+        setLiveLogCount(0); // Reset count when enabling
+        setPage(1); // Reset to first page
+      }
+      return newLiveMode;
+    });
+  }, []);
+
+  // WebSocket connection for live logs
+  const { isConnected, isConnecting } = useWebSocket({
+    url: getWebSocketUrl('/ws/logs'),
+    onMessage: handleWebSocketMessage,
+    onConnect: handleWebSocketConnect,
+    onDisconnect: handleWebSocketDisconnect,
+    onError: handleWebSocketError,
+    autoReconnect: true,
+    maxReconnectAttempts: 5,
+    reconnectInterval: 3000
+  });
+
   // Fetch logs with filters and pagination
   useEffect(() => {
     if (!isClient) return;
+    
+    // Skip fetching in live mode - logs come from WebSocket
+    if (isLiveMode) {
+      setLoading(false);
+      return;
+    }
+    
     async function fetchLogs() {
       setLoading(true);
       setError(null);
@@ -249,7 +319,7 @@ export default function LogViewer() {
     }
 
     fetchLogs();
-  }, [isClient, filters, page, pageSize, regexError]);
+  }, [isClient, filters, page, pageSize, regexError, isLiveMode]);
 
   // Export filtered logs
   const exportLogs = useCallback(async () => {
@@ -324,6 +394,58 @@ export default function LogViewer() {
             <p className="text-gray-600 dark:text-gray-300 mt-2">Advanced log filtering with regex support</p>
           </div>
           <div className="flex items-center gap-2">
+            {/* Live Mode Status Indicator */}
+            <div className="flex items-center gap-2 px-3 py-2 bg-gray-100 dark:bg-gray-800 rounded-lg text-sm">
+              {isConnected && isLiveMode ? (
+                <>
+                  <Wifi className="w-4 h-4 text-green-500" />
+                  <span className="text-green-600 dark:text-green-400">Live</span>
+                  {liveLogCount > 0 && (
+                    <span className="bg-green-500 text-white px-2 py-1 rounded-full text-xs">
+                      +{liveLogCount}
+                    </span>
+                  )}
+                </>
+              ) : isLiveMode && isConnecting ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-yellow-500 border-t-transparent rounded-full animate-spin" />
+                  <span className="text-yellow-600 dark:text-yellow-400">Connecting...</span>
+                </>
+              ) : isLiveMode ? (
+                <>
+                  <WifiOff className="w-4 h-4 text-red-500" />
+                  <span className="text-red-600 dark:text-red-400">Disconnected</span>
+                </>
+              ) : (
+                <>
+                  <Pause className="w-4 h-4 text-gray-500" />
+                  <span className="text-gray-600 dark:text-gray-400">Static</span>
+                </>
+              )}
+            </div>
+
+            {/* Live Mode Toggle */}
+            <button
+              onClick={toggleLiveMode}
+              className={`px-4 py-2 rounded-lg flex items-center gap-2 transition-colors ${
+                isLiveMode 
+                  ? 'bg-red-600 hover:bg-red-700 text-white' 
+                  : 'bg-blue-600 hover:bg-blue-700 text-white'
+              }`}
+            >
+              {isLiveMode ? (
+                <>
+                  <Pause className="w-4 h-4" />
+                  Stop Live
+                </>
+              ) : (
+                <>
+                  <Play className="w-4 h-4" />
+                  Go Live
+                </>
+              )}
+            </button>
+
             <button
               onClick={exportLogs}
               className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2"
