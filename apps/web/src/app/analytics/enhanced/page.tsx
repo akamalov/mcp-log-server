@@ -44,6 +44,8 @@ interface EnhancedAnalytics {
   };
 }
 
+let intervalIdCounter = 0;
+
 export default function EnhancedAnalyticsPage() {
   const [analyticsData, setAnalyticsData] = useState<EnhancedAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
@@ -98,27 +100,34 @@ export default function EnhancedAnalyticsPage() {
 
   // Dedicated effect for interval management
   useEffect(() => {
+    // Brute-force clear all intervals (dev/debug only)
+    for (let i = 1; i < 20000; i++) {
+      clearInterval(i);
+    }
     if (mode === 'live') {
       if (!intervalRef.current) {
         fetchEnhancedAnalytics();
+        intervalIdCounter++;
         intervalRef.current = setInterval(() => {
           fetchEnhancedAnalytics();
-          console.log('Live interval tick');
+          console.log('Live interval tick, id:', intervalIdCounter);
         }, 5000);
-        console.log('Interval created for Live mode');
+        console.log('Interval created for Live mode, id:', intervalIdCounter);
+      } else {
+        console.warn('Attempted to create interval but one already exists, id:', intervalIdCounter);
       }
     } else {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
+        console.log('Interval cleared because mode is not live, id:', intervalIdCounter);
         intervalRef.current = null;
-        console.log('Interval cleared because mode is not live');
       }
     }
     return () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
+        console.log('Interval cleared on unmount, id:', intervalIdCounter);
         intervalRef.current = null;
-        console.log('Interval cleared on unmount');
       }
     };
   }, [mode]);
@@ -126,8 +135,10 @@ export default function EnhancedAnalyticsPage() {
   // Fetch analytics data once on mode or time range change
   useEffect(() => {
     if (mode === 'manual') {
+      console.log('fetchEnhancedAnalytics called in manual mode');
       fetchEnhancedAnalytics();
     } else if (mode === 'live') {
+      console.log('fetchEnhancedAnalytics called in live mode (effect)');
       fetchEnhancedAnalytics();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
