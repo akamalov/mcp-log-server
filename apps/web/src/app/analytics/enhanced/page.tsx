@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { config } from '@/lib/config';
 import { 
@@ -50,42 +50,73 @@ export default function EnhancedAnalyticsPage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedTimeRange, setSelectedTimeRange] = useState('24h');
   const [selectedView, setSelectedView] = useState('performance');
+  const [mode, setMode] = useState<'live' | 'manual'>('manual');
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [logs, setLogs] = useState<any[]>([]);
+  const [logPage, setLogPage] = useState(0);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const LOGS_PAGE_SIZE = 25;
+
+  const fetchEnhancedAnalytics = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const healthResponse = await fetch(`${config.backendUrl}/health`);
+      if (!healthResponse.ok) throw new Error('Backend is not healthy');
+      const response = await fetch(`${config.backendUrl}/api/analytics/enhanced?timeRange=${selectedTimeRange}`);
+      if (!response.ok) {
+        setAnalyticsData(generateMockEnhancedData());
+      } else {
+        const data = await response.json();
+        setAnalyticsData(data);
+      }
+    } catch (error) {
+      setAnalyticsData(generateMockEnhancedData());
+      setError('Using mock data - enhanced analytics endpoint not implemented yet');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchPaginatedLogs = async (page = 0) => {
+    setLogsLoading(true);
+    try {
+      const response = await fetch(`${config.backendUrl}/api/analytics/enhanced/logs?limit=${LOGS_PAGE_SIZE}&offset=${page * LOGS_PAGE_SIZE}`);
+      if (response.ok) {
+        const data = await response.json();
+        setLogs(data);
+      } else {
+        setLogs([]);
+      }
+    } catch (err) {
+      setLogs([]);
+    } finally {
+      setLogsLoading(false);
+    }
+  };
 
   useEffect(() => {
-    async function fetchEnhancedAnalytics() {
-      setLoading(true);
-      setError(null);
-      
-      try {
-        // First, check the health of the backend
-        const healthResponse = await fetch(`${config.backendUrl}/health`);
-        if (!healthResponse.ok) {
-          throw new Error('Backend is not healthy');
-        }
-
-        // Try to fetch enhanced analytics (this endpoint may not exist yet)
-        const response = await fetch(`${config.backendUrl}/api/analytics/enhanced?timeRange=${selectedTimeRange}`);
-        
-        if (!response.ok) {
-          // If enhanced endpoint doesn't exist, generate mock data
-          console.log('Enhanced analytics endpoint not found, using mock data');
-          setAnalyticsData(generateMockEnhancedData());
-        } else {
-          const data = await response.json();
-          setAnalyticsData(data);
-        }
-      } catch (error) {
-        console.error('Failed to fetch enhanced analytics:', error);
-        // Use mock data as fallback
-        setAnalyticsData(generateMockEnhancedData());
-        setError('Using mock data - enhanced analytics endpoint not implemented yet');
-      } finally {
-        setLoading(false);
-      }
+    if (mode === 'live') {
+      fetchEnhancedAnalytics(); // fetch immediately
+      intervalRef.current = setInterval(fetchEnhancedAnalytics, 5000); // fetch every 5s
+      return () => {
+        if (intervalRef.current) clearInterval(intervalRef.current);
+      };
+    } else {
+      if (intervalRef.current) clearInterval(intervalRef.current);
     }
+    // Only fetch once in manual mode
+    if (mode === 'manual') fetchEnhancedAnalytics();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, selectedTimeRange]);
 
-    fetchEnhancedAnalytics();
-  }, [selectedTimeRange]);
+  // Only fetch logs when requested in manual mode
+  useEffect(() => {
+    if (mode === 'manual') {
+      setLogs([]);
+      setLogPage(0);
+    }
+  }, [mode]);
 
   // Generate mock data for enhanced analytics
   const generateMockEnhancedData = (): EnhancedAnalytics => {
@@ -411,6 +442,55 @@ export default function EnhancedAnalyticsPage() {
     </div>
   );
 
+  const renderLogsTable = () => (
+    <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mt-6">
+      <h3 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">Logs (Manual Pull, 25 per page)</h3>
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-sm">
+          <thead>
+            <tr>
+              <th className="px-2 py-1">Timestamp</th>
+              <th className="px-2 py-1">Level</th>
+              <th className="px-2 py-1">Source</th>
+              <th className="px-2 py-1">Message</th>
+            </tr>
+          </thead>
+          <tbody>
+            {logs.length === 0 && !logsLoading && (
+              <tr><td colSpan={4} className="text-center py-2 text-gray-500">No logs to display</td></tr>
+            )}
+            {logs.map((log, idx) => (
+              <tr key={log.id || idx}>
+                <td className="px-2 py-1 whitespace-nowrap">{log.timestamp}</td>
+                <td className="px-2 py-1">{log.level}</td>
+                <td className="px-2 py-1">{log.source}</td>
+                <td className="px-2 py-1 max-w-xs truncate" title={log.message}>{log.message}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="flex items-center justify-between mt-4">
+        <button
+          className="px-3 py-1 rounded bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-50"
+          onClick={() => { if (logPage > 0) { setLogPage(logPage - 1); fetchPaginatedLogs(logPage - 1); } }}
+          disabled={logPage === 0 || logsLoading}
+        >
+          Previous
+        </button>
+        <span className="text-sm text-gray-600 dark:text-gray-300">Page {logPage + 1}</span>
+        <button
+          className="px-3 py-1 rounded bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-50"
+          onClick={() => { setLogPage(logPage + 1); fetchPaginatedLogs(logPage + 1); }}
+          disabled={logs.length < LOGS_PAGE_SIZE || logsLoading}
+        >
+          Next
+        </button>
+      </div>
+      {logsLoading && <div className="mt-2 text-blue-600">Loading logs...</div>}
+    </div>
+  );
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-8">
@@ -456,6 +536,34 @@ export default function EnhancedAnalyticsPage() {
           </div>
           
           <div className="flex items-center space-x-2">
+            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Mode:</label>
+            <button
+              className={`px-3 py-1 rounded ${mode === 'live' ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'}`}
+              onClick={() => setMode('live')}
+            >
+              Go Live
+            </button>
+            <button
+              className={`px-3 py-1 rounded ${mode === 'manual' ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'}`}
+              onClick={() => setMode('manual')}
+            >
+              Manual Pull
+            </button>
+            {mode === 'manual' && (
+              <button
+                className="ml-2 px-3 py-1 rounded bg-green-600 text-white hover:bg-green-700"
+                onClick={fetchEnhancedAnalytics}
+                disabled={loading}
+              >
+                Refresh
+              </button>
+            )}
+            {mode === 'live' && (
+              <span className="ml-2 px-2 py-1 rounded bg-green-200 text-green-800 text-xs">Live</span>
+            )}
+          </div>
+          
+          <div className="flex items-center space-x-2">
             <label className="text-sm font-medium text-gray-700 dark:text-gray-300">View:</label>
             <div className="flex space-x-1">
               {[
@@ -486,6 +594,19 @@ export default function EnhancedAnalyticsPage() {
           {selectedView === 'behavior' && renderBehaviorView()}
           {selectedView === 'predictive' && renderPredictiveView()}
           {selectedView === 'patterns' && renderPatternView()}
+          {/* Manual Pull Logs Table */}
+          {mode === 'manual' && (
+            <div>
+              <button
+                className="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700 mt-4"
+                onClick={() => fetchPaginatedLogs(logPage)}
+                disabled={logsLoading}
+              >
+                Fetch Logs
+              </button>
+              {renderLogsTable()}
+            </div>
+          )}
         </div>
       </div>
     </div>
