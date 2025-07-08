@@ -1675,6 +1675,31 @@ export async function createServer(config: ServerConfig, logger: Logger): Promis
     }
   });
 
+  // Enhanced Analytics: Paginated Logs Endpoint
+  fastify.get('/api/analytics/enhanced/logs', async (request, reply) => {
+    try {
+      const { limit = 25, offset = 0, start, end } = request.query as any;
+      // Optionally support time range filtering
+      const timeRange = {
+        start: start ? new Date(start) : new Date(Date.now() - 24 * 60 * 60 * 1000),
+        end: end ? new Date(end) : new Date()
+      };
+      // Use ClickHouse getLogEntries with limit/offset
+      const logs = await enhancedAnalyticsService.clickhouse.getLogEntries({
+        startTime: timeRange.start,
+        endTime: timeRange.end,
+        limit: parseInt(limit),
+        offset: parseInt(offset),
+        sortBy: 'timestamp',
+        sortOrder: 'DESC'
+      });
+      return reply.send(logs);
+    } catch (error) {
+      fastify.log.error('Failed to get enhanced logs:', error);
+      return reply.status(500).send({ error: 'Failed to get enhanced logs' });
+    }
+  });
+
   // Start the WebSocket heartbeat only after all services and routes are initialized
   webSocketService.startHeartbeat();
 
